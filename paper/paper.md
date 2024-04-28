@@ -7,15 +7,20 @@ tags:
 authors:
   - name: Nicholas J. Dimonaco
     orcid: 0000-0002-3808-206X
-    affiliation: 1
+    affiliation: 1, 2, 3
 affiliations:
-  - name: Department of Medicine, McMaster University, Canada
+  - name: Department of Medicine, McMaster University, Ontario, Canada
     index: 1
+  - name: School of Biological Sciences, Queen's University Belfast, Northern Ireland, UK
+    index: 2
+  - name: Department of Computer Science, Aberystwyth University, Wales, UK
+    index: 3
 date: 28 April 2024
 bibliography: paper.bib
 ---
 
 # Summary
-abcd
+PyamilySeek (or Family Seek) is a Python-based tool for clustering gene sequences into families based on sequence similarity as computed by tools such as DIAMOND, CD-HIT or MMseqs2.
+
 
 # References

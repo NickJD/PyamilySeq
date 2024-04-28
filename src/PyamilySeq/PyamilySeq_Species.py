@@ -4,7 +4,6 @@ import math
 import sys
 import argparse
 
-
 try:
     from .Constants import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
@@ -32,13 +31,12 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
         seen_StORFs = []
         Added_StORF_Genomes = 0
         try:  # get the cluster from the storf clusters which contains this rep
-            clustered_combined = combined_pangenome_clusters_First_Second_clustered[
-                rep]  # Not true clusters - I put a PEP as key myself
+            clustered_combined = combined_pangenome_clusters_First_Second_clustered[rep]  # Not true clusters - I put a PEP as key myself
             seen_clust_Genomes = []
             num_clustered_PEP[cluster].append(rep + '_' + str(len(pep_genomes)))
 
             for clust in clustered_combined:
-                if options.reclustered not in clust:  # Not good enough at the moment
+                if options.sequence_tag not in clust:  # Not good enough at the moment
                     ### Need to get the number of pep genomes for each pep clustered into this
                     Com_PEPs += 1  #
                     recorded_PEP.append(clust)
@@ -50,7 +48,7 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
                         if clust_Genome not in pep_genomes:
                             Com_PEP_Genomes += 1
                     num_clustered_PEP[cluster].append(clust + '_' + str(reps[clust][1]))
-                elif options.reclustered in clust:
+                elif options.sequence_tag in clust:
                     StORFs += 1
                     clust_Genome = clust.split('|')[0]
                     if clust_Genome not in seen_StORFs:
@@ -76,17 +74,7 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
                 #     print("W")
             pangenome_clusters_Type[cluster] = [len(num_clustered_PEP[cluster]), sum(size_of_pep_clusters),
                                                 size_of_pep_clusters, Added_StORF_Genomes, StORFs, len(seen_StORFs)]
-            if len(peps) > 1:
-                print("")
-                if Added_StORF_Genomes > 10:
-                    print("")
-            if len(peps) > 2:
-                print("")
-            if len(peps) > pep_max_comb[0]:
-                pep_max_comb = [len(peps), peps]
-            num_pep_combined = sum(size_of_pep_clusters)
-            if len(peps) > 1 and all(i >= 5 for i in size_of_pep_clusters):
-                print("")
+
         except KeyError:
             ###Singleton
             num_pep_genomes = [len(pep_genomes)]
@@ -186,7 +174,7 @@ def combined_clustering(options, genome_dict):
 
     clusters_with_Seconds = []
 
-    not_StORF_Only_Cluster_IDs = []
+    not_Second_only_cluster_ids = []
     already_seen_PEP = []
     Combined_clusters = OrderedDict()
     Combined_reps = OrderedDict()
@@ -237,8 +225,6 @@ def combined_clustering(options, genome_dict):
             clustered = clustered.split('>')[1]
             clustered = clustered.split('...')[0]
             genome = clustered.split('|')[0]
-            if genome not in unique_genomes:
-                unique_genomes.append(genome)
             genome_dict[genome] += 1
             if '*' in line:
                 rep = clustered
@@ -246,22 +232,21 @@ def combined_clustering(options, genome_dict):
             if first == False:
                 Combined_clusters[cluster_id].append(clustered)
                 clustered_genome = clustered.split('|')[0]
-                if options.reclustered in line:
+                if options.sequence_tag in line:
                     if cluster_id not in clusters_with_Seconds:  # For counting?
                         clusters_with_Seconds.append(cluster_id)
                     if clustered_genome not in combined_pangenome_clusters_Second[cluster_id]:
                         combined_pangenome_clusters_Second[cluster_id].append(clustered_genome)
                     combined_pangenome_clusters_Second_sequences[cluster_id].append(clustered)
                 else:
-                    if cluster_id not in not_StORF_Only_Cluster_IDs:
-                        not_StORF_Only_Cluster_IDs.append(
-                            cluster_id)  # Tell us which StORF_Reporter clustered are unmatched to a PEP
+                    if cluster_id not in not_Second_only_cluster_ids:
+                        not_Second_only_cluster_ids.append(cluster_id)  # Tell us which StORF_Reporter clustered are unmatched to a PEP
                     if clustered_genome not in combined_pangenome_clusters_First[cluster_id]:
                         combined_pangenome_clusters_First[cluster_id].append(clustered_genome)
                     combined_pangenome_clusters_First_sequences[cluster_id].append(clustered)
 
 
-    return combined_pangenome_clusters_First_Second_clustered,not_StORF_Only_Cluster_IDs, combined_pangenome_clusters_Second, unique_genomes
+    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
 
 def cluster(options):
@@ -319,9 +304,9 @@ def cluster(options):
     ######################################
 
     if options.reclustered != None:
-        combined_pangenome_clusters_First_Second_clustered,not_StORF_Only_Cluster_IDs,combined_pangenome_clusters_Second,\
+        combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
             unique_genomes = combined_clustering(options, genome_dict)
-        pangenome_clusters_Type = combined_clustering_counting()
+        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
 
 
     else:
@@ -336,9 +321,10 @@ def cluster(options):
     core_90 = math.floor(9/10 * len(genome_dict))
     core_15 = math.floor(1.5/10 * len(genome_dict))
 
-    cores = OrderedDict({'first_core_99':0,'first_core_95':0,'first_core_15':0,'extended_99':0,'extended_95':0
-             ,'extended_15':0,'comb_extended_99':0,'comb_extended_95':0,'comb_extended_15':0,'second_core_99':0,'second_core_95':0,'second_core_15':0,
-                                     'only_second_core_99':0,'only_second_core_95':0,'only_second_core_15':0})
+    cores = OrderedDict({'first_core_99':0,'first_core_95':0,'first_core_90':0,'first_core_15':0,'extended_99':0,'extended_95':0,'extended_90':0
+             ,'extended_15':0,'comb_extended_99':0,'comb_extended_95':0,'comb_extended_90':0,'comb_extended_15':0,'second_core_99':0,'second_core_95':0,'second_core_90':0,
+                         'second_core_15':0,
+                                     'only_second_core_99':0,'only_second_core_95':0,'only_second_core_90':0,'only_second_core_15':0})
 
 
 
@@ -363,8 +349,8 @@ def cluster(options):
             cores['first_core_99'] += 1
         elif pep_num >= math.floor(core_95) and pep_num < math.floor(core_99):# and StORF_num == 0:
             cores['first_core_95'] += 1
-        # elif pep_num >= math.floor(core_90) and pep_num < math.floor(core_95):# and StORF_num == 0:
-        #     cores['first_core_90'] += 1
+        elif pep_num >= math.floor(core_90) and pep_num < math.floor(core_95):# and StORF_num == 0:
+            cores['first_core_90'] += 1
         if pep_num >= math.floor(core_15) and pep_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
             cores['first_core_15'] += 1
             record_all_pep_15.append(pep_num)
@@ -376,8 +362,8 @@ def cluster(options):
         elif pep_num < math.floor(core_95) and pep_num != 0 and pep_num+storf_num >= math.floor(core_95) and pep_num+storf_num < math.floor(core_99):
             cores['extended_95'] +=1
             soft_core_list.append(cluster)
-        # elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
-        #     cores['extended_90'] +=1
+        elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
+            cores['extended_90'] +=1
         if pep_num < math.floor(core_15) and pep_num != 0 and pep_num+storf_num >= math.floor(core_15) and pep_num+storf_num < math.floor(core_95):
             cores['extended_15'] +=1
             accessory_list.append(cluster)
@@ -387,8 +373,8 @@ def cluster(options):
             cores['comb_extended_99'] +=1
         elif pep_num < math.floor(core_95) and pep_num != 0 and pep_num+storf_num >= math.floor(core_95) and pep_num+storf_num < math.floor(core_99):
             cores['comb_extended_95'] +=1
-        # elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
-        #     cores['comb_extended_90'] +=1
+        elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
+            cores['comb_extended_90'] +=1
         if pep_num < math.floor(core_15) and pep_num != 0 and pep_num+storf_num >= math.floor(core_15) and pep_num+storf_num < math.floor(core_95):
             cores['comb_extended_15'] +=1
     ######################### StORFs Only >>><<<
@@ -397,8 +383,8 @@ def cluster(options):
             cores['second_core_99'] += 1
         elif storf_num >= math.floor(core_95) and storf_num < math.floor(core_99):# and StORF_num == 0:
             cores['second_core_95'] += 1
-        # elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
-        #     cores['second_core_90'] += 1
+        elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
+            cores['second_core_90'] += 1
         if storf_num >= math.floor(core_15) and storf_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
             cores['second_core_15'] += 1
     ###########################
@@ -408,8 +394,8 @@ def cluster(options):
             second_core_only.append(cluster)
         elif storf_num >= math.floor(core_95) and storf_num < math.floor(core_99):# and StORF_num == 0:
             cores['only_second_core_95'] += 1
-        # elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
-        #     cores['only_second_core_90'] += 1
+        elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
+            cores['only_second_core_90'] += 1
         if storf_num >= math.floor(core_15) and storf_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
             cores['only_second_core_15'] += 1
 
@@ -452,7 +438,7 @@ def cluster(options):
         combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
         combined_pangenome_clusters_Second_Type = defaultdict(list)
         for cluster, genomes in combined_pangenome_clusters_Second.items():
-            if cluster in not_StORF_Only_Cluster_IDs:
+            if cluster in not_Second_only_cluster_ids:
                 combined_pangenome_clusters_Second_Type[cluster] = [cluster, len(genomes)]
             else:
                 combined_pangenome_clusters_ONLY_Second_Type[cluster] = [cluster, len(genomes)]
@@ -465,9 +451,9 @@ def cluster(options):
 
                 calc_only_StORF_only_core(cluster, data[1])  # ,numbers[3])
     ###########################
-    ###########################
     print("End")
-    print(cores)
+    for key, value in cores.items():
+        print(f"{key}: {value}")
 
 
 
@@ -480,23 +466,14 @@ def main():
     required.add_argument('-c', action='store', dest='clusters', help='Clustering output file from CD-HIT, DIAMOND or MMseqs2',
                         required=True)
     required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'DIAMOND', 'MMseqs2'],
-                        help='Which clustering algorithm used (CD-HIT, DIAMOND or MMseqs2)', required=True)
+                        help='Default - "CD-HIT": Which clustering algorithm used (CD-HIT, DIAMOND or MMseqs2)', required=True)
 
 
     optional = parser.add_argument_group('Optional Arguments')
     optional.add_argument('-rc', action='store', dest='reclustered', help='Clustering output file from secondary round of clustering',
                         required=False)
-    # optional.add_argument('-min_score', action='store', dest='minscore', default='30', type=int,
-    #                     help='Minimum BitScore to keep StORF: Default 30')
-    #
-    # output = parser.add_argument_group('Output')
-    # output.add_argument('-oname', action="store", dest='o_name', required=False,
-    #                     help='Default - Appends \'_UR\' to end of input GFF filename')
-    # output.add_argument('-odir', action="store", dest='o_dir', required=False,
-    #                     help='Default -  Same directory as input GFF')
-    # output.add_argument('-gz', action='store', dest='gz', default='False', type=eval, choices=[True, False],
-    #                     help='Default - False: Output as .gz')
-
+    optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish first and second round clustered sequences',
+                        required=False)
 
     misc = parser.add_argument_group('Misc')
     misc.add_argument('-verbose', action='store', dest='verbose', default=False, type=eval, choices=[True, False],
@@ -512,8 +489,8 @@ def main():
         else:
             exit('PyamilySeq: error: the following arguments are required: -c, -f')
 
-    if options.format != None:
-        options.format = 'StORF'
+    if options.sequence_tag == None:
+        options.sequence_tag = 'StORF'
 
     cluster(options)
 
