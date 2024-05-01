@@ -1,3 +1,5 @@
+from line_profiler_pycharm import profile # For code profiling
+
 from collections import OrderedDict,defaultdict
 import copy
 import math
@@ -10,159 +12,160 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from Constants import *
 
 
+def get_cores(options,genome_dict):
+    ##Calculate core groups
+    groups = OrderedDict()
+    cores = OrderedDict()
+    prev_top = len(genome_dict)
+    first = True
+    for group in options.core_groups.split(','):
+        calculated_floor = math.floor(int(group) / 100 * len(genome_dict))
+        if first == False:
+            groups[group] = (calculated_floor,prev_top -1)
+        else:
+            groups[group] = (calculated_floor, prev_top)
+            first = False
+        prev_top = calculated_floor
+        first_core_group = 'first_core_' + group
+        cores[first_core_group] = 0
+        if options.reclustered != None:
+            extended_core_group = 'extended_core_' + group
+            cores[extended_core_group] = 0
+            combined_core_group = 'combined_core_' + group
+            cores[combined_core_group] = 0
+            second_core_group = 'second_core_' + group
+            cores[second_core_group] = 0
+            only_second_core_group = 'only_second_core_' + group
+            cores[only_second_core_group] = 0
+    return cores, groups
+
+@profile
+def calc_pep_only_core(pep_num, groups, cores):
+    groups_as_list = list(groups.values())
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num <= fir):
+        res = idx
+    family_group = list(groups)[res]
+    cores['first_core_'+family_group] +=1
+
+@profile
+def calc_single_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count gene families extended with StORFs
+    groups_as_list = list(groups.values())
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
+        res = idx
+    family_group = list(groups)[res]
+    cores['extended_core_' + family_group] += 1
+
+
+@profile
+def calc_multi_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
+    groups_as_list = list(groups.values())
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
+        res = idx
+    family_group = list(groups)[res]
+    cores['combined_core_' + family_group] += 1
+
+
+@profile
+def calc_StORF_only_core(groups, cores, second_num):
+    groups_as_list = list(groups.values())
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
+        res = idx
+    family_group = list(groups)[res]
+    cores['second_core_' + family_group] += 1
+
+@profile
+def calc_only_StORF_only_core(groups, cores, second_num): # only count the true storf onlies
+    groups_as_list = list(groups.values())
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
+        res = idx
+    family_group = list(groups)[res]
+    cores['only_second_core_' + family_group] += 1
+
+
+
+
+
+@profile
 def combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered):
-    ####################
-    ALL_PEPS = 0
-    Com_PEPs = 0
-    Com_PEPs_List = []
-    total_combined_pep_clusters = []
-    only_PEP = []
-    num_clustered_PEP = defaultdict(list)
-    recorded_PEP = []
+    num_clustered_First = defaultdict(list)
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
     list_of_reps = list(reps.keys())
-    pep_max_comb = [0, 0]
     for cluster, pep_genomes in pangenome_clusters_First.items():
         rep = list_of_reps[int(cluster)]  # get the rep of the current pep cluster
-        # if rep not in recorded_PEP:
-        recorded_PEP.append(rep)
         Com_PEP_Genomes = 0
-        StORFs = 0
-        seen_StORFs = []
-        Added_StORF_Genomes = 0
+        Seconds = 0
+        seen_Seconds = []
+        added_Second_genomes = 0
         try:  # get the cluster from the storf clusters which contains this rep
             clustered_combined = combined_pangenome_clusters_First_Second_clustered[rep]  # Not true clusters - I put a PEP as key myself
             seen_clust_Genomes = []
-            num_clustered_PEP[cluster].append(rep + '_' + str(len(pep_genomes)))
-
+            num_clustered_First[cluster].append(rep + '_' + str(len(pep_genomes)))
             for clust in clustered_combined:
                 if options.sequence_tag not in clust:  # Not good enough at the moment
-                    ### Need to get the number of pep genomes for each pep clustered into this
-                    Com_PEPs += 1  #
-                    recorded_PEP.append(clust)
-                    if (rep + '_' + str(len(pep_genomes))) not in Com_PEPs_List:
-                        Com_PEPs_List.append(rep + '_' + str(len(pep_genomes)))
                     clust_Genome = clust.split('|')[0]
                     if clust_Genome not in seen_clust_Genomes:
                         seen_clust_Genomes.append(clust_Genome)
                         if clust_Genome not in pep_genomes:
                             Com_PEP_Genomes += 1
-                    num_clustered_PEP[cluster].append(clust + '_' + str(reps[clust][1]))
+                    num_clustered_First[cluster].append(clust + '_' + str(reps[clust][1]))
                 elif options.sequence_tag in clust:
-                    StORFs += 1
+                    Seconds += 1
                     clust_Genome = clust.split('|')[0]
-                    if clust_Genome not in seen_StORFs:
-                        seen_StORFs.append(clust_Genome)
+                    if clust_Genome not in seen_Seconds:
+                        seen_Seconds.append(clust_Genome)
                     if clust_Genome not in seen_clust_Genomes:
                         seen_clust_Genomes.append(clust_Genome)
                         if clust_Genome not in pep_genomes:
-                            Added_StORF_Genomes += 1
+                            added_Second_genomes += 1
                 else:
-                    print("WHAT")
+                    sys.exit("Error: looking for sequence_tag")
 
             size_of_pep_clusters = []
-            peps = num_clustered_PEP[cluster]
-            if len(peps) > 1:
-                total_combined_pep_clusters.append(peps)
+            peps = num_clustered_First[cluster]
             for pep in peps:
                 pep = pep.rsplit('_', 1)
-                # if pep[0] not in recorded_PEP: # Do not record PEPs are combined and on their own.
                 size_of_pep_clusters.append(int(pep[1]))
-                ALL_PEPS += int(pep[1])
-                recorded_PEP.append(pep[0])
-                # else:
-                #     print("W")
-            pangenome_clusters_Type[cluster] = [len(num_clustered_PEP[cluster]), sum(size_of_pep_clusters),
-                                                size_of_pep_clusters, Added_StORF_Genomes, StORFs, len(seen_StORFs)]
+            pangenome_clusters_Type[cluster] = [len(num_clustered_First[cluster]), sum(size_of_pep_clusters),
+                                                size_of_pep_clusters, added_Second_genomes, Seconds, len(seen_Seconds)]
 
         except KeyError:
             ###Singleton
             num_pep_genomes = [len(pep_genomes)]
-            ALL_PEPS += len(pep_genomes)
-            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, Added_StORF_Genomes, StORFs,
-                                                len(seen_StORFs)]
-            only_PEP.append(cluster)
+            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, added_Second_genomes, Seconds,
+                                                len(seen_Seconds)]
 
     return pangenome_clusters_Type
 
+@profile
 def single_clustering_counting(options, pangenome_clusters_First, reps):
-    ####################
-    ALL_PEPS = 0
-    Com_PEPs = 0
-    Com_PEPs_List = []
-    total_combined_pep_clusters = []
-    only_PEP = []
     num_clustered_PEP = defaultdict(list)
     recorded_PEP = []
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
     list_of_reps = list(reps.keys())
-    pep_max_comb = [0, 0]
     for cluster, pep_genomes in pangenome_clusters_First.items():
         rep = list_of_reps[int(cluster)]  # get the rep of the current pep cluster
-        # if rep not in recorded_PEP:
-        recorded_PEP.append(rep)
 
         try:  # get the cluster from the storf clusters which contains this rep
-            # clustered_combined = combined_pangenome_clusters_First_Second_clustered[
-            #     rep]  # Not true clusters - I put a PEP as key myself
-            # seen_clust_Genomes = []
             num_clustered_PEP[cluster].append(rep + '_' + str(len(pep_genomes)))
-
-            # for clust in clustered_combined:
-            #     if options.reclustered not in clust:  # Not good enough at the moment
-            #         ### Need to get the number of pep genomes for each pep clustered into this
-            #         Com_PEPs += 1  #
-            #         recorded_PEP.append(clust)
-            #         if (rep + '_' + str(len(pep_genomes))) not in Com_PEPs_List:
-            #             Com_PEPs_List.append(rep + '_' + str(len(pep_genomes)))
-            #         clust_Genome = clust.split('|')[0]
-            #         if clust_Genome not in seen_clust_Genomes:
-            #             seen_clust_Genomes.append(clust_Genome)
-            #             if clust_Genome not in pep_genomes:
-            #                 Com_PEP_Genomes += 1
-            #         num_clustered_PEP[cluster].append(clust + '_' + str(reps[clust][1]))
-            #     elif options.reclustered in clust:
-            #         StORFs += 1
-            #         clust_Genome = clust.split('|')[0]
-            #         if clust_Genome not in seen_StORFs:
-            #             seen_StORFs.append(clust_Genome)
-            #         if clust_Genome not in seen_clust_Genomes:
-            #             seen_clust_Genomes.append(clust_Genome)
-            #             if clust_Genome not in pep_genomes:
-            #                 Added_StORF_Genomes += 1
-            #     else:
-            #         print("WHAT")
-
             size_of_pep_clusters = []
             peps = num_clustered_PEP[cluster]
-            if len(peps) > 1:
-                total_combined_pep_clusters.append(peps)
             for pep in peps:
                 pep = pep.rsplit('_', 1)
-                # if pep[0] not in recorded_PEP: # Do not record PEPs are combined and on their own.
                 size_of_pep_clusters.append(int(pep[1]))
-                ALL_PEPS += int(pep[1])
                 recorded_PEP.append(pep[0])
-                # else:
-                #     print("W")
             pangenome_clusters_Type[cluster] = [len(num_clustered_PEP[cluster]), sum(size_of_pep_clusters),
                                                 size_of_pep_clusters, 0, 0, 0]
-
-
 
         except KeyError:
             ###Singleton
             num_pep_genomes = [len(pep_genomes)]
-            ALL_PEPS += len(pep_genomes)
-            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, 0, 0,
-                                                0]
-            only_PEP.append(cluster)
+            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, 0, 0, 0]
 
     return pangenome_clusters_Type
 
 
 
-
+@profile
 def combined_clustering(options, genome_dict):
     unique_genomes = []
     Second_in = open(options.reclustered, 'r')
@@ -171,8 +174,6 @@ def combined_clustering(options, genome_dict):
     combined_pangenome_clusters_Second = OrderedDict()
     combined_pangenome_clusters_Second_sequences = OrderedDict()
     combined_pangenome_clusters_First_Second_clustered = OrderedDict()
-
-    clusters_with_Seconds = []
 
     not_Second_only_cluster_ids = []
     already_seen_PEP = []
@@ -190,12 +191,8 @@ def combined_clustering(options, genome_dict):
                             continue
                         else:
                             already_seen_PEP.append(pep)
-                #  if len(Combined_pangenome_clusters_PEP[cluster_id]) > 1:
-                #      print("Here")
-                if len(combined_pangenome_clusters_Second_sequences[cluster_id]) > 0 and len(
-                        combined_pangenome_clusters_First_sequences[cluster_id]) > 0:
-                    if len(combined_pangenome_clusters_First_sequences[
-                               cluster_id]) > 1:  # If we have clustered >1 PEP family, we need to record 1 as key and all others are val
+                if len(combined_pangenome_clusters_Second_sequences[cluster_id]) > 0 and len(combined_pangenome_clusters_First_sequences[cluster_id]) > 0:
+                    if len(combined_pangenome_clusters_First_sequences[cluster_id]) > 1:  # If we have clustered >1 PEP family, we need to record 1 as key and all others are val
                         all_but_first = combined_pangenome_clusters_First_sequences[cluster_id][1:]
                         storfs_clustered = combined_pangenome_clusters_Second_sequences[cluster_id]
                         VALUE = all_but_first + storfs_clustered
@@ -203,13 +200,6 @@ def combined_clustering(options, genome_dict):
                         VALUE = combined_pangenome_clusters_Second_sequences[cluster_id]
                     KEY = combined_pangenome_clusters_First_sequences[cluster_id][0]
                     combined_pangenome_clusters_First_Second_clustered.update({KEY: VALUE})
-                if len(Combined_clusters[cluster_id]) == 1 : # Stop at end of file
-                    # Combined_pangenome_clusters_PEP.popitem()
-                    # Combined_pangenome_clusters_PEP_SEQS.popitem()
-                    # Combined_pangenome_clusters_StORF_SEQS.popitem()
-                    # Combined_pangenome_clusters_Con_StORF.popitem()
-                    # Combined_reps.popitem()
-                    break
             cluster_id = line.strip('>')
             cluster_id = cluster_id.strip('\n')
             cluster_id = cluster_id.split(' ')[1]
@@ -233,8 +223,6 @@ def combined_clustering(options, genome_dict):
                 Combined_clusters[cluster_id].append(clustered)
                 clustered_genome = clustered.split('|')[0]
                 if options.sequence_tag in line:
-                    if cluster_id not in clusters_with_Seconds:  # For counting?
-                        clusters_with_Seconds.append(cluster_id)
                     if clustered_genome not in combined_pangenome_clusters_Second[cluster_id]:
                         combined_pangenome_clusters_Second[cluster_id].append(clustered_genome)
                     combined_pangenome_clusters_Second_sequences[cluster_id].append(clustered)
@@ -248,34 +236,21 @@ def combined_clustering(options, genome_dict):
 
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
-
+@profile
 def cluster(options):
     First_in = open(options.clusters, 'r')
     clusters = OrderedDict()
     pangenome_clusters_First = OrderedDict()
     pangenome_clusters_First_sequences = OrderedDict()
-
-    count = 0
     first = True
     genome_dict = defaultdict(int)
     reps = OrderedDict()
-    county = 0
-
-    singleton_cluster = []
     ## Load in all data for easier reuse later
     for line in First_in:
         if line.startswith('>'):
             if first == False:
                 cluster_size = len(clusters[cluster_id])
                 reps.update({rep:[cluster_size,len(pangenome_clusters_First[cluster_id])]})
-                if len(clusters[cluster_id]) == 1:# and not singleton_cluster: # Stop at clusters smaller than 10
-                    #singleton_cluster.append(cluster_id)
-                #     pangenome_clusters_PEP.popitem()
-                #     pangenome_clusters_PEP_SEQS.popitem()
-
-                #     reps.popitem()
-                    break
-            Ensem_genomes, Con_genomes = [], []
             cluster_id = line.strip('>')
             cluster_id = cluster_id.strip('\n')
             cluster_id = cluster_id.split(' ')[1]
@@ -296,138 +271,51 @@ def cluster(options):
             if first == False:
                 clusters[cluster_id].append(clustered)
                 clustered_genome = clustered.split('|')[0]
-
                 if clustered_genome not in pangenome_clusters_First[cluster_id]:
                     pangenome_clusters_First[cluster_id].append(clustered_genome)
                 pangenome_clusters_First_sequences[cluster_id].append(clustered)
 
     ######################################
+    cores, groups = get_cores(options, genome_dict)
+    ###
 
     if options.reclustered != None:
         combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
             unique_genomes = combined_clustering(options, genome_dict)
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
-
-
     else:
         pangenome_clusters_Type = single_clustering_counting(options, pangenome_clusters_First, reps)
 
-
-
-    #######################################
-
-    core_99 = math.floor(9.9/10 * len(genome_dict))
-    core_95 = math.floor(9.5/10 * len(genome_dict))
-    core_90 = math.floor(9/10 * len(genome_dict))
-    core_15 = math.floor(1.5/10 * len(genome_dict))
-
-    cores = OrderedDict({'first_core_99':0,'first_core_95':0,'first_core_90':0,'first_core_15':0,'extended_99':0,'extended_95':0,'extended_90':0
-             ,'extended_15':0,'comb_extended_99':0,'comb_extended_95':0,'comb_extended_90':0,'comb_extended_15':0,'second_core_99':0,'second_core_95':0,'second_core_90':0,
-                         'second_core_15':0,
-                                     'only_second_core_99':0,'only_second_core_95':0,'only_second_core_90':0,'only_second_core_15':0})
-
-
-
-    StORF_Seqs_Extended = []
-    StORF_Genomes_Extended = []
-
-    record_all_pep_15 = []
-
-    core_list = []
-    soft_core_list = []
-    accessory_list = []
-
-    second_core_only = []
-
-    list_all_pep_numbers = defaultdict(int)
-
-
-    ############################ Count PEP separately first to get TRUE Ensembl gene families
-    def calc_pep_only_core(pep_num):
-        list_all_pep_numbers[pep_num] +=1
-        if pep_num >= math.floor(core_99):# and StORF_num == 0:
-            cores['first_core_99'] += 1
-        elif pep_num >= math.floor(core_95) and pep_num < math.floor(core_99):# and StORF_num == 0:
-            cores['first_core_95'] += 1
-        elif pep_num >= math.floor(core_90) and pep_num < math.floor(core_95):# and StORF_num == 0:
-            cores['first_core_90'] += 1
-        if pep_num >= math.floor(core_15) and pep_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
-            cores['first_core_15'] += 1
-            record_all_pep_15.append(pep_num)
-        #####################
-    def calc_single_pep_extended_StORF_only_core(cluster,pep_num,storf_num): # Count gene families extended with StORFs
-        if pep_num < math.floor(core_99) and pep_num != 0 and pep_num+storf_num >= math.floor(core_99):
-            cores['extended_99'] +=1
-            core_list.append(cluster)
-        elif pep_num < math.floor(core_95) and pep_num != 0 and pep_num+storf_num >= math.floor(core_95) and pep_num+storf_num < math.floor(core_99):
-            cores['extended_95'] +=1
-            soft_core_list.append(cluster)
-        elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
-            cores['extended_90'] +=1
-        if pep_num < math.floor(core_15) and pep_num != 0 and pep_num+storf_num >= math.floor(core_15) and pep_num+storf_num < math.floor(core_95):
-            cores['extended_15'] +=1
-            accessory_list.append(cluster)
     #####################################
-    def calc_multi_pep_extended_StORF_only_core(pep_num,storf_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
-        if pep_num < math.floor(core_99) and pep_num != 0 and pep_num+storf_num >= math.floor(core_99):
-            cores['comb_extended_99'] +=1
-        elif pep_num < math.floor(core_95) and pep_num != 0 and pep_num+storf_num >= math.floor(core_95) and pep_num+storf_num < math.floor(core_99):
-            cores['comb_extended_95'] +=1
-        elif pep_num < math.floor(core_90) and pep_num != 0 and pep_num+storf_num >= math.floor(core_90) and pep_num+storf_num < math.floor(core_95):
-            cores['comb_extended_90'] +=1
-        if pep_num < math.floor(core_15) and pep_num != 0 and pep_num+storf_num >= math.floor(core_15) and pep_num+storf_num < math.floor(core_95):
-            cores['comb_extended_15'] +=1
-    ######################### StORFs Only >>><<<
-    def calc_StORF_only_core(storf_num):
-        if storf_num >= math.floor(core_99):# and StORF_num == 0:
-            cores['second_core_99'] += 1
-        elif storf_num >= math.floor(core_95) and storf_num < math.floor(core_99):# and StORF_num == 0:
-            cores['second_core_95'] += 1
-        elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
-            cores['second_core_90'] += 1
-        if storf_num >= math.floor(core_15) and storf_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
-            cores['second_core_15'] += 1
-    ###########################
-    def calc_only_StORF_only_core(cluster,storf_num): # only count the true storf onlies
-        if storf_num >= math.floor(core_99):# and StORF_num == 0:
-            cores['only_second_core_99'] += 1
-            second_core_only.append(cluster)
-        elif storf_num >= math.floor(core_95) and storf_num < math.floor(core_99):# and StORF_num == 0:
-            cores['only_second_core_95'] += 1
-        elif storf_num >= math.floor(core_90) and storf_num < math.floor(core_95):# and StORF_num == 0:
-            cores['only_second_core_90'] += 1
-        if storf_num >= math.floor(core_15) and storf_num < math.floor(core_95):# and StORF_num == 0:  # this catch captures some from first_core_90
-            cores['only_second_core_15'] += 1
 
-    record_all_pep = []
+    ######################### StORFs Only >>><<<
+
+    ###########################
+
+
 
     counter = 0
-
     Number_Of_StORF_Extending_But_Same_Genomes = 0
 
 
     print("Running")
-    for cluster, numbers in pangenome_clusters_Type.items(): # put limits here to make sure storf and enembl only are in more than one genome.
-        if numbers[3] >= 1:
-            StORF_Genomes_Extended.append(numbers[3])
-        if numbers[4] >= 1:
-            StORF_Seqs_Extended.append(numbers[4])
+    for cluster, numbers in pangenome_clusters_Type.items():
     ############################### Calc PEP only
         ######### TO fix - Only loop through the first 1's to get the baseline pep numbs?
         if numbers[0] == 1 and numbers[1] >=2: # If StORFs did not combine PEP reps
-            calc_pep_only_core(numbers[1])#,numbers[3])
+            calc_pep_only_core(numbers[1],groups,cores)#,numbers[3])
             counter +=1
         elif numbers[0] >1 and numbers[1] >=2: # IF StORFs combined multiple PEP
-            calc_pep_only_core(numbers[2][0])
+            calc_pep_only_core(numbers[2][0],groups,cores)
             counter += 1
 
     ############################# Calc PEP and StORF_Reporter - M
         if numbers[0] == 1 and numbers[3] >= 1: # If StORFs did not combine PEP reps
-            calc_single_pep_extended_StORF_only_core(cluster,numbers[1],numbers[3])
+            calc_single_pep_extended_StORF_only_core(numbers[1],groups, cores, numbers[3])
         elif numbers[0] >1 and numbers[3] >= 1: # IF unique StORFs combined multiple PEP
             #grouped_pep = sum(numbers[2])
             #for num in numbers[2]:
-            calc_multi_pep_extended_StORF_only_core(numbers[1],numbers[3])
+            calc_multi_pep_extended_StORF_only_core(numbers[1], groups, cores, numbers[3])
 
         elif numbers[4] >= 1:
             Number_Of_StORF_Extending_But_Same_Genomes +=1
@@ -445,11 +333,11 @@ def cluster(options):
                 #     multi_PEP_Combined_By_StORFs_num_of_PEP_Clusters +=1
         for cluster, data in combined_pangenome_clusters_Second_Type.items():
             # if data[1] >= 2:
-            calc_StORF_only_core(data[1])  # ,numbers[3])multi_PEP_Combined_By_StORFs
+            calc_StORF_only_core(groups, cores, data[1])  # ,numbers[3])multi_PEP_Combined_By_StORFs
         for cluster, data in combined_pangenome_clusters_ONLY_Second_Type.items():
             if data[1] >= 2:
 
-                calc_only_StORF_only_core(cluster, data[1])  # ,numbers[3])
+                calc_only_StORF_only_core(groups, cores, data[1])  # ,numbers[3])
     ###########################
     print("End")
     for key, value in cores.items():
@@ -474,6 +362,8 @@ def main():
                         required=False)
     optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish first and second round clustered sequences',
                         required=False)
+    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,90,80,15",
+                        help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
 
     misc = parser.add_argument_group('Misc')
     misc.add_argument('-verbose', action='store', dest='verbose', default=False, type=eval, choices=[True, False],
@@ -492,10 +382,14 @@ def main():
     if options.sequence_tag == None:
         options.sequence_tag = 'StORF'
 
+    options.core_groups = options.core_groups + ',0'
+
     cluster(options)
 
     print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
           "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")
+
+
 
 
 
