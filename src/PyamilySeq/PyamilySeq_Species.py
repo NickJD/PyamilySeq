@@ -1,4 +1,4 @@
-from line_profiler_pycharm import profile # For code profiling
+#from line_profiler_pycharm import profile
 
 from collections import OrderedDict,defaultdict
 import copy
@@ -39,7 +39,7 @@ def get_cores(options,genome_dict):
             cores[only_second_core_group] = 0
     return cores, groups
 
-@profile
+#@profile
 def calc_pep_only_core(pep_num, groups, cores):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num <= fir):
@@ -47,7 +47,7 @@ def calc_pep_only_core(pep_num, groups, cores):
     family_group = list(groups)[res]
     cores['first_core_'+family_group] +=1
 
-@profile
+#@profile
 def calc_single_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count gene families extended with StORFs
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
@@ -56,7 +56,7 @@ def calc_single_pep_extended_StORF_only_core(pep_num, groups, cores, second_num)
     cores['extended_core_' + family_group] += 1
 
 
-@profile
+#@profile
 def calc_multi_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
@@ -65,7 +65,7 @@ def calc_multi_pep_extended_StORF_only_core(pep_num, groups, cores, second_num):
     cores['combined_core_' + family_group] += 1
 
 
-@profile
+#@profile
 def calc_StORF_only_core(groups, cores, second_num):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
@@ -73,7 +73,7 @@ def calc_StORF_only_core(groups, cores, second_num):
     family_group = list(groups)[res]
     cores['second_core_' + family_group] += 1
 
-@profile
+#@profile
 def calc_only_StORF_only_core(groups, cores, second_num): # only count the true storf onlies
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
@@ -85,7 +85,7 @@ def calc_only_StORF_only_core(groups, cores, second_num): # only count the true 
 
 
 
-@profile
+#@profile
 def combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered):
     num_clustered_First = defaultdict(list)
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
@@ -136,7 +136,7 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
 
     return pangenome_clusters_Type
 
-@profile
+#@profile
 def single_clustering_counting(options, pangenome_clusters_First, reps):
     num_clustered_PEP = defaultdict(list)
     recorded_PEP = []
@@ -165,7 +165,7 @@ def single_clustering_counting(options, pangenome_clusters_First, reps):
 
 
 
-@profile
+#@profile
 def combined_clustering(options, genome_dict):
     unique_genomes = []
     Second_in = open(options.reclustered, 'r')
@@ -236,7 +236,7 @@ def combined_clustering(options, genome_dict):
 
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
-@profile
+#@profile
 def cluster(options):
     First_in = open(options.clusters, 'r')
     clusters = OrderedDict()
@@ -340,9 +340,12 @@ def cluster(options):
                 calc_only_StORF_only_core(groups, cores, data[1])  # ,numbers[3])
     ###########################
     print("End")
-    for key, value in cores.items():
-        print(f"{key}: {value}")
-
+    key_order = ['first_core_', 'extended_core_', 'combined_core_', 'second_core_','only_second_core_']
+    print("Gene Family Groups:")
+    for key_prefix in key_order:
+        for key, value in cores.items():
+            if key.startswith(key_prefix):
+                print(f"{key}: {value}")
 
 
 def main():
@@ -362,7 +365,7 @@ def main():
                         required=False)
     optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish first and second round clustered sequences',
                         required=False)
-    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,90,80,15",
+    optional.add_argument('-groups', action="store", dest='core_groups', default="99,80,15",
                         help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
 
     misc = parser.add_argument_group('Misc')
