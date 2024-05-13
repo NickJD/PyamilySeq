@@ -166,7 +166,7 @@ def single_clustering_counting(options, pangenome_clusters_First, reps):
 
 
 #@profile
-def combined_clustering(options, genome_dict):
+def combined_clustering_CDHit(options, genome_dict):
     unique_genomes = []
     Second_in = open(options.reclustered, 'r')
     combined_pangenome_clusters_First = OrderedDict()
@@ -236,8 +236,52 @@ def combined_clustering(options, genome_dict):
 
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
-#@profile
-def cluster(options):
+def cluster_MMSEQS2(options):
+    cluster_id = 0
+    last_rep = ''
+    first = True
+    First_in = open(options.clusters, 'r')
+    pangenome_clusters_First = OrderedDict()
+    pangenome_clusters_First_sequences = OrderedDict()
+    genome_dict = defaultdict(int)
+    reps = OrderedDict()
+    for line in First_in:
+        rep, child = line.strip().split('\t')
+        child_genome = child.split('|')[0]  # Extracting the genome identifier from the child sequence
+
+        # Counting occurrences of genomes
+        genome_dict[child_genome] += 1
+
+        if first == True:
+            pangenome_clusters_First[0] = []
+            pangenome_clusters_First_sequences[0] = []
+            first = False
+
+        if rep != last_rep and last_rep != '':
+            cluster_id +=1
+            pangenome_clusters_First[cluster_id] = []
+            pangenome_clusters_First_sequences[cluster_id] = []
+            cluster_size = len(pangenome_clusters_First_sequences[cluster_id-1])
+            reps.update({last_rep: [cluster_size, len(pangenome_clusters_First[cluster_id-1])]})
+            pangenome_clusters_First[cluster_id] = []
+            pangenome_clusters_First_sequences[cluster_id] = []
+
+
+        if child_genome not in pangenome_clusters_First[cluster_id]:
+            pangenome_clusters_First[cluster_id].append(child_genome)
+        pangenome_clusters_First_sequences[cluster_id].append(child)
+
+        last_rep = rep
+
+        cluster_size = len(pangenome_clusters_First_sequences[cluster_id])
+        reps.update({rep: [cluster_size, len(pangenome_clusters_First[cluster_id])]})
+
+
+    return genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps
+
+
+
+def cluster_CDHIT(options):
     First_in = open(options.clusters, 'r')
     clusters = OrderedDict()
     pangenome_clusters_First = OrderedDict()
@@ -250,13 +294,13 @@ def cluster(options):
         if line.startswith('>'):
             if first == False:
                 cluster_size = len(clusters[cluster_id])
-                reps.update({rep:[cluster_size,len(pangenome_clusters_First[cluster_id])]})
+                reps.update({rep: [cluster_size, len(pangenome_clusters_First[cluster_id])]})
             cluster_id = line.strip('>')
             cluster_id = cluster_id.strip('\n')
             cluster_id = cluster_id.split(' ')[1]
             clusters.update({cluster_id: []})
-            pangenome_clusters_First.update({cluster_id:[]})
-            pangenome_clusters_First_sequences.update({cluster_id:[]})
+            pangenome_clusters_First.update({cluster_id: []})
+            pangenome_clusters_First_sequences.update({cluster_id: []})
 
             first = False
         else:
@@ -264,16 +308,25 @@ def cluster(options):
             clustered = clustered.split('>')[1]
             clustered = clustered.split('...')[0]
             genome = clustered.split('|')[0]
-            genome_dict[genome] +=1
+            genome_dict[genome] += 1
             if '*' in line:
                 rep = clustered
-                reps.update({rep:[0,0]})
+                reps.update({rep: [0, 0]})
             if first == False:
                 clusters[cluster_id].append(clustered)
                 clustered_genome = clustered.split('|')[0]
                 if clustered_genome not in pangenome_clusters_First[cluster_id]:
                     pangenome_clusters_First[cluster_id].append(clustered_genome)
                 pangenome_clusters_First_sequences[cluster_id].append(clustered)
+    return genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps
+
+#@profile
+def cluster(options):
+
+    if options.format == 'CD-HIT':
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options)
+    elif options.format == 'MMseqs2':
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_MMSEQS2(options)
 
     ######################################
     cores, groups = get_cores(options, genome_dict)
@@ -281,17 +334,10 @@ def cluster(options):
 
     if options.reclustered != None:
         combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
-            unique_genomes = combined_clustering(options, genome_dict)
+            unique_genomes = combined_clustering_CDHIT(options, genome_dict)
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
     else:
         pangenome_clusters_Type = single_clustering_counting(options, pangenome_clusters_First, reps)
-
-    #####################################
-
-    ######################### StORFs Only >>><<<
-
-    ###########################
-
 
 
     counter = 0
@@ -363,7 +409,7 @@ def main():
     optional = parser.add_argument_group('Optional Arguments')
     optional.add_argument('-rc', action='store', dest='reclustered', help='Clustering output file from secondary round of clustering',
                         required=False)
-    optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish first and second round clustered sequences',
+    optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
                         required=False)
     optional.add_argument('-groups', action="store", dest='core_groups', default="99,80,15",
                         help='Default - (\'99,95,90,80,15\'): Gene family groups to use')

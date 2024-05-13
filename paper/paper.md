@@ -23,36 +23,37 @@ bibliography: paper.bib
 ---
 
 # Summary
-PyamilySeq (Family Seek) is a Python-based tool for grouping gene sequences into families based on sequence similarity identified by tools such as CD-HIT[fu2012cd], DIAMOND[buchfink2021sensitive], BLAST[camacho2009blast+] or MMseqs2[steinegger2017mmseqs2]. This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter[dimonaco2023storf] publication in NAR (https://doi.org/10.1093/nar/gkad814). 
+PyamilySeq (Family Seek) is a Python-based tool for grouping gene sequences into families based on sequence similarity identified by tools such as CD-HIT[@fu2012cd], DIAMOND[@buchfink2021sensitive], BLAST[@camacho2009blast+] or MMseqs2[@steinegger2017mmseqs2]. This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter[@dimonaco2023storf] publication in NAR (https://doi.org/10.1093/nar/gkad814). 
 
 
 # Statement of need
-PyamilySeq is a user-friendly tool for detecting gene groups or 'families'. Unlike other tools that focus on species pangenome, PyamilySeq gives users more control over the process. It works with leading clustering tools to group DNA and amino acid sequences, including non-coding elements like tRNA and ncRNA. Plus, it can also work with re-clustered sequences from various annotation sources, as seen in projects like StORF-Reporter. PyamilySeq fills a gap in existing pangenome tools by catering to these specific needs.
+PyamilySeq is a user-friendly tool for detecting gene groups or 'families'. Unlike similar tools that focus on a rigid definition of a species pangenome, PyamilySeq gives users more control over the process. It works with leading clustering tools to group DNA and amino acid sequences, including non-coding elements like tRNA and ncRNA. Plus, it can also work with re-clustered sequences from various annotation sources, as seen in projects like StORF-Reporter. PyamilySeq fills a gap in existing pangenome/gene family analysis tools by catering to these specific needs.
 
 
 # Method
-PyamilySeq works by taking the output from a sequence clustering tool such as CD-HIT and using user-defined parameters, groups the sets of sequences into 
+PyamilySeq works by taking the output from a sequence clustering tool such as CD-HIT and using user-defined parameters, groups the sequences into non-overlapping user-defined sets. This is a similar approach to pangenome analysis tools such as Roary[@page2015roary] or Panaroo[@tonkin2020producing] but does not utilise gene synteny or 'care' about the types of sequences (CDS, tRNA, ncRNA etc) that it works with. 
 
 For species-wide clustering, sequence IDs must be formatted with the name of the genome separated from the rest of the ID (gene name) by a '|'.
 We provide a set of tools to allow for the correct formatting of sequences before clustering is performed with one of the compatible tools. 
 
 
-Below is the example output of 10 <em>Escherichia coli (E. coli)</em> genomes from Ensembl Bacteria[yates2022ensembl].
+Below is the example output of 10 <em>Escherichia coli (E. coli)</em> genomes from Ensembl Bacteria[@yates2022ensembl], clustered with CD-HIT and analysed by PyamilySeq.
 
 
 Table 1:
-This table reports and example output of using PyamilySeq on a set of 10 <em>E. coli</em> genomes with the canonical annotations from Ensembl and additional annotations from StORF-Reporter.
+This table reports an example output of using PyamilySeq on a set of 10 <em>E. coli</em> genomes with the canonical annotations from Ensembl and additional annotations from StORF-Reporter.
 
 | **Cluster type**       | **Core** | **Soft-Core** | **Accessory** |
 |------------------------|----------|---------------|---------------|
-| Ensembl-Only           | 752      | 2,078          | 3,289          |
-| Ensembl-StORF          | 66       | 89            | 568           |
-| StORF-Combined-Ensembl | 0        | 1             | 16            |
-| StORF                  | 2        | 21            | 587           |
-| StORF-Only             | 127      | 359           | 3,832          |
+| Ensembl-Only           | 3,370    | 210           | 2,728         |
+| Ensembl-StORF          | 10       | 3             | 33            |
+| StORF-Combined-Ensembl | 0        | 0             | 2             |
+| StORF                  | 0        | 0             | 54            |
+| StORF-Only             | 348      | 267           | 3,224         |
 
 
-
+Table 2:
+This table.. Is an example of using PyamilySeq for the cross-genera analysis - Will update
 
 | **Cluster Type**       | **1 Genus** | **2 Genera** | **3 Genera** | **4 Genera** | **5 Genera** | **6 Genera** | **>6 Genera** |
 |------------------------|-------------|--------------|--------------|--------------|--------------|--------------|---------------|
