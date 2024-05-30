@@ -12,6 +12,10 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from Constants import *
 
 
+def coinfinder_output(options):
+    print("placeholder")
+
+
 def get_cores(options,genome_dict):
     ##Calculate core groups
     groups = OrderedDict()
@@ -166,7 +170,7 @@ def single_clustering_counting(options, pangenome_clusters_First, reps):
 
 
 #@profile
-def combined_clustering_CDHit(options, genome_dict):
+def combined_clustering_CDHIT(options, genome_dict):
     unique_genomes = []
     Second_in = open(options.reclustered, 'r')
     combined_pangenome_clusters_First = OrderedDict()
@@ -266,13 +270,11 @@ def cluster_MMSEQS2(options):
             pangenome_clusters_First[cluster_id] = []
             pangenome_clusters_First_sequences[cluster_id] = []
 
-
         if child_genome not in pangenome_clusters_First[cluster_id]:
             pangenome_clusters_First[cluster_id].append(child_genome)
+
         pangenome_clusters_First_sequences[cluster_id].append(child)
-
         last_rep = rep
-
         cluster_size = len(pangenome_clusters_First_sequences[cluster_id])
         reps.update({rep: [cluster_size, len(pangenome_clusters_First[cluster_id])]})
 
@@ -333,8 +335,9 @@ def cluster(options):
     ###
 
     if options.reclustered != None:
-        combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
-            unique_genomes = combined_clustering_CDHIT(options, genome_dict)
+        if options.format == 'CD-HIT':
+            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
+                unique_genomes = combined_clustering_CDHIT(options, genome_dict)
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
     else:
         pangenome_clusters_Type = single_clustering_counting(options, pangenome_clusters_First, reps)
@@ -393,6 +396,9 @@ def cluster(options):
             if key.startswith(key_prefix):
                 print(f"{key}: {value}")
 
+    if options.coinfinder_out != None:
+        print("")
+
 
 def main():
 
@@ -413,6 +419,8 @@ def main():
                         required=False)
     optional.add_argument('-groups', action="store", dest='core_groups', default="99,80,15",
                         help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
+    optional.add_argument('-cf', action='store', dest='coinfinder_out', help='Default - No Coinfinder output: File name to be used for Coinfinder data output',
+                        required=False)
 
     misc = parser.add_argument_group('Misc')
     misc.add_argument('-verbose', action='store', dest='verbose', default=False, type=eval, choices=[True, False],

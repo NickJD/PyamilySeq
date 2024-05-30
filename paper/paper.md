@@ -23,7 +23,10 @@ bibliography: paper.bib
 ---
 
 # Summary
-PyamilySeq (Family Seek) is a Python-based tool for grouping gene sequences into families based on sequence similarity identified by tools such as CD-HIT[@fu2012cd], DIAMOND[@buchfink2021sensitive], BLAST[@camacho2009blast] or MMseqs2[@steinegger2017mmseqs2]. This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter[@dimonaco2023storf] publication in NAR (https://doi.org/10.1093/nar/gkad814). 
+PyamilySeq (Family Seek) is a Python-based tool for grouping gene sequences into families based on sequence similarity identified by tools such as CD-HIT[@fu2012cd], DIAMOND[@buchfink2021sensitive], BLAST[@camacho2009blast] or MMseqs2[@steinegger2017mmseqs2]. 
+PyamilySeq can output the sequences for each reported group and input required for downstream analysis using tools such as Coinfinder[@whelan2020coinfinder]. 
+
+This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter[@dimonaco2023storf] publication in NAR (https://doi.org/10.1093/nar/gkad814). 
 
 
 # Statement of need
