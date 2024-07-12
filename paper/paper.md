@@ -1,5 +1,6 @@
 ---
-title: 'PyamilySeq (Family Seek): a Python-based tool for clustering gene sequences into families based on sequence similarity identified by tools such as CD-HIT, DIAMOND, BLAST or MMseqs2.'
+title: 'PyamilySeq (Family Seek): a Python-based tool for clustering gene sequences into families based on sequence similarity identified by tools such as
+ CD-HIT, DIAMOND, BLAST or MMseqs2.'
 tags:
   - Python
   - bioinformatics

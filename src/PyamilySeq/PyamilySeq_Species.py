@@ -5,6 +5,7 @@ import copy
 import math
 import sys
 import argparse
+import os
 
 try:
     from .Constants import *
@@ -12,9 +13,54 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from Constants import *
 
 
-def coinfinder_output(options):
-    print("placeholder")
+def custom_sort_key(k, dict1, dict2):
+    return (len(dict1[k]), len(dict2[k]))
 
+def sort_keys_by_values(dict1, dict2):
+    sorted_keys = sorted(dict1.keys(), key=lambda k: custom_sort_key(k, dict1, dict2), reverse=True)
+    return sorted_keys
+
+def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
+    print("Outputting gene_presence_absence file")
+    in_name = options.clusters.split('.')[0]
+    gpa_outfile = open(in_name+'_gene_presence_absence.csv','w')
+    gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
+                     '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
+    gpa_outfile.write('","'.join(genome_dict.keys()))
+    gpa_outfile.write('"\n')
+    for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
+        average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
+        gpa_outfile.write('"group_'+str(cluster)+'","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
+                         '","","","","","","","","",""')
+
+        full_out = ''
+        for genome in genome_dict.keys():
+            tmp_list = []
+            for value in sequences:
+                if value.split('|')[0] == genome:
+                    tmp_list.append(value)
+            if tmp_list:
+                full_out += ',"'+''.join(tmp_list)+'"'
+            gpa_outfile.write(full_out)
+        gpa_outfile.write('\n')
+
+### Below is some unfinished code
+    # edge_list_outfile = open(in_name+'_edge_list.csv','w')
+    # for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
+    #     output = []
+    #     for entry in sequences:
+    #         # Split each entry at '|'
+    #         genome, gene = entry.split('|')
+    #         # Format the result as "gene  genome"
+    #         output.append(f"{gene}\t{genome}")
+    #     for line in output:
+    #         edge_list_outfile.write(line + '\n')
+
+
+
+
+def reorder_dict_by_keys(original_dict, sorted_keys):
+    return {k: original_dict[k] for k in sorted_keys}
 
 def get_cores(options,genome_dict):
     ##Calculate core groups
@@ -44,7 +90,7 @@ def get_cores(options,genome_dict):
     return cores, groups
 
 #@profile
-def calc_pep_only_core(pep_num, groups, cores):
+def calc_First_only_core(pep_num, groups, cores):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num <= fir):
         res = idx
@@ -52,7 +98,7 @@ def calc_pep_only_core(pep_num, groups, cores):
     cores['first_core_'+family_group] +=1
 
 #@profile
-def calc_single_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count gene families extended with StORFs
+def calc_single_First_extended_Second_only_core(pep_num, groups, cores, second_num): # Count gene families extended with StORFs
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
         res = idx
@@ -61,7 +107,7 @@ def calc_single_pep_extended_StORF_only_core(pep_num, groups, cores, second_num)
 
 
 #@profile
-def calc_multi_pep_extended_StORF_only_core(pep_num, groups, cores, second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
+def calc_multi_First_extended_Second_only_core(pep_num, groups, cores, second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
         res = idx
@@ -70,7 +116,7 @@ def calc_multi_pep_extended_StORF_only_core(pep_num, groups, cores, second_num):
 
 
 #@profile
-def calc_StORF_only_core(groups, cores, second_num):
+def calc_Second_only_core(groups, cores, second_num):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
         res = idx
@@ -78,7 +124,7 @@ def calc_StORF_only_core(groups, cores, second_num):
     cores['second_core_' + family_group] += 1
 
 #@profile
-def calc_only_StORF_only_core(groups, cores, second_num): # only count the true storf onlies
+def calc_only_Second_only_core(groups, cores, second_num): # only count the true storf onlies
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= second_num <= fir):
         res = idx
@@ -240,7 +286,90 @@ def combined_clustering_CDHIT(options, genome_dict):
 
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
-def cluster_MMSEQS2(options):
+def combined_clustering_Edge_List(options, genome_dict):
+    if options.format == 'TSV':
+        separator = '\t'
+    elif options.format == 'CSV':
+        separator = ','
+    unique_genomes = []
+    cluster_id = 0
+    last_rep = ''
+    Second_in = open(options.reclustered, 'r')
+    combined_pangenome_clusters_First = OrderedDict()
+    combined_pangenome_clusters_First_sequences = OrderedDict()
+    combined_pangenome_clusters_Second = OrderedDict()
+    combined_pangenome_clusters_Second_sequences = OrderedDict()
+    combined_pangenome_clusters_First_Second_clustered = OrderedDict()
+
+    not_Second_only_cluster_ids = []
+    already_seen_PEP = []
+    Combined_clusters = OrderedDict()
+    Combined_reps = OrderedDict()
+    first = True
+    for line in Second_in:
+        rep, child = line.strip().split(separator)
+        child_genome = child.split('|')[0]  # Extracting the genome identifier from the child sequence
+
+        if first == True:
+            Combined_clusters.update({cluster_id: []})
+            combined_pangenome_clusters_First.update({cluster_id: []})
+            combined_pangenome_clusters_First_sequences.update({cluster_id: []})
+            combined_pangenome_clusters_Second.update({cluster_id: []})
+            combined_pangenome_clusters_Second_sequences.update({cluster_id: []})
+            Combined_reps.update({rep: 0})
+            first = False
+
+        if first == False:
+            if rep != last_rep and last_rep != '':
+                cluster_size = len(Combined_clusters[cluster_id])
+                Combined_reps.update({rep: cluster_size})
+                for pep in combined_pangenome_clusters_First_sequences[cluster_id]:
+                    if pep != []:
+                        if pep in already_seen_PEP:
+                            continue
+                        else:
+                            already_seen_PEP.append(pep)
+                if len(combined_pangenome_clusters_Second_sequences[cluster_id]) > 0 and len(combined_pangenome_clusters_First_sequences[cluster_id]) > 0:
+                    if len(combined_pangenome_clusters_First_sequences[cluster_id]) > 1:  # If we have clustered >1 PEP family, we need to record 1 as key and all others are val
+                        all_but_first = combined_pangenome_clusters_First_sequences[cluster_id][1:]
+                        storfs_clustered = combined_pangenome_clusters_Second_sequences[cluster_id]
+                        VALUE = all_but_first + storfs_clustered
+                    else:
+                        VALUE = combined_pangenome_clusters_Second_sequences[cluster_id]
+                    KEY = combined_pangenome_clusters_First_sequences[cluster_id][0]
+                    combined_pangenome_clusters_First_Second_clustered.update({KEY: VALUE})
+
+                cluster_id += 1
+                Combined_clusters.update({cluster_id: []})
+                combined_pangenome_clusters_First.update({cluster_id: []})
+                combined_pangenome_clusters_First_sequences.update({cluster_id: []})
+                combined_pangenome_clusters_Second.update({cluster_id: []})
+                combined_pangenome_clusters_Second_sequences.update({cluster_id: []})
+                Combined_reps.update({rep: 0})
+
+
+        Combined_clusters[cluster_id].append(child)
+        if options.sequence_tag in line:
+            if child_genome not in combined_pangenome_clusters_Second[cluster_id]:
+                combined_pangenome_clusters_Second[cluster_id].append(child_genome)
+            combined_pangenome_clusters_Second_sequences[cluster_id].append(child)
+        else:
+            if cluster_id not in not_Second_only_cluster_ids:
+                not_Second_only_cluster_ids.append(cluster_id)  # Tell us which StORF_Reporter clustered are unmatched to a PEP
+            if child_genome not in combined_pangenome_clusters_First[cluster_id]:
+                combined_pangenome_clusters_First[cluster_id].append(child_genome)
+            combined_pangenome_clusters_First_sequences[cluster_id].append(child)
+
+        last_rep = rep
+
+    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
+
+
+def cluster_EdgeList(options):
+    if options.format == 'TSV':
+        separator = '\t'
+    elif options.format == 'CSV':
+        separator = ','
     cluster_id = 0
     last_rep = ''
     first = True
@@ -250,12 +379,10 @@ def cluster_MMSEQS2(options):
     genome_dict = defaultdict(int)
     reps = OrderedDict()
     for line in First_in:
-        rep, child = line.strip().split('\t')
+        rep, child = line.strip().split(separator)
         child_genome = child.split('|')[0]  # Extracting the genome identifier from the child sequence
-
         # Counting occurrences of genomes
         genome_dict[child_genome] += 1
-
         if first == True:
             pangenome_clusters_First[0] = []
             pangenome_clusters_First_sequences[0] = []
@@ -269,7 +396,6 @@ def cluster_MMSEQS2(options):
             reps.update({last_rep: [cluster_size, len(pangenome_clusters_First[cluster_id-1])]})
             pangenome_clusters_First[cluster_id] = []
             pangenome_clusters_First_sequences[cluster_id] = []
-
         if child_genome not in pangenome_clusters_First[cluster_id]:
             pangenome_clusters_First[cluster_id].append(child_genome)
 
@@ -327,8 +453,8 @@ def cluster(options):
 
     if options.format == 'CD-HIT':
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options)
-    elif options.format == 'MMseqs2':
-        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_MMSEQS2(options)
+    elif options.format in ['TSV','CSV']:
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options)
 
     ######################################
     cores, groups = get_cores(options, genome_dict)
@@ -338,6 +464,9 @@ def cluster(options):
         if options.format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
                 unique_genomes = combined_clustering_CDHIT(options, genome_dict)
+        if options.format == 'TSV':
+            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
+                unique_genomes = combined_clustering_Edge_List(options, genome_dict)
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
     else:
         pangenome_clusters_Type = single_clustering_counting(options, pangenome_clusters_First, reps)
@@ -346,32 +475,29 @@ def cluster(options):
     counter = 0
     Number_Of_StORF_Extending_But_Same_Genomes = 0
 
+    sorted_first_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
+    pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_first_keys)
+    pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences, sorted_first_keys)
+    pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type, sorted_first_keys)
 
-    print("Running")
-    for cluster, numbers in pangenome_clusters_Type.items():
-    ############################### Calc PEP only
-        ######### TO fix - Only loop through the first 1's to get the baseline pep numbs?
-        if numbers[0] == 1 and numbers[1] >=2: # If StORFs did not combine PEP reps
-            calc_pep_only_core(numbers[1],groups,cores)#,numbers[3])
+    print("Calculating Groups")
+    for cluster, numbers in pangenome_clusters_Type_sorted.items():
+    ############################### Calculate First only
+        if numbers[0] == 1 and numbers[1] >=2:
+            calc_First_only_core(numbers[1],groups,cores)
             counter +=1
-        elif numbers[0] >1 and numbers[1] >=2: # IF StORFs combined multiple PEP
-            calc_pep_only_core(numbers[2][0],groups,cores)
+        elif numbers[0] >1 and numbers[1] >=2:
+            calc_First_only_core(numbers[2][0],groups,cores)
             counter += 1
 
-    ############################# Calc PEP and StORF_Reporter - M
-        if numbers[0] == 1 and numbers[3] >= 1: # If StORFs did not combine PEP reps
-            calc_single_pep_extended_StORF_only_core(numbers[1],groups, cores, numbers[3])
-        elif numbers[0] >1 and numbers[3] >= 1: # IF unique StORFs combined multiple PEP
-            #grouped_pep = sum(numbers[2])
-            #for num in numbers[2]:
-            calc_multi_pep_extended_StORF_only_core(numbers[1], groups, cores, numbers[3])
-
-        elif numbers[4] >= 1:
-            Number_Of_StORF_Extending_But_Same_Genomes +=1
-            # for num in numbers[2]:
-
-            ############## Typing for the StORF_Reporter-Data
     if options.reclustered != None:
+        ############################# Calculate First and Reclustered-Second
+        if numbers[0] == 1 and numbers[3] >= 1:  # If Seconds did not combine First reps
+            calc_single_First_extended_Second_only_core(numbers[1], groups, cores, numbers[3])
+        elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Secondss combined multiple Firsts
+            calc_multi_First_extended_Second_only_core(numbers[1], groups, cores, numbers[3])
+        elif numbers[4] >= 1:
+            Number_Of_StORF_Extending_But_Same_Genomes += 1
         combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
         combined_pangenome_clusters_Second_Type = defaultdict(list)
         for cluster, genomes in combined_pangenome_clusters_Second.items():
@@ -379,14 +505,11 @@ def cluster(options):
                 combined_pangenome_clusters_Second_Type[cluster] = [cluster, len(genomes)]
             else:
                 combined_pangenome_clusters_ONLY_Second_Type[cluster] = [cluster, len(genomes)]
-                #     multi_PEP_Combined_By_StORFs_num_of_PEP_Clusters +=1
         for cluster, data in combined_pangenome_clusters_Second_Type.items():
-            # if data[1] >= 2:
-            calc_StORF_only_core(groups, cores, data[1])  # ,numbers[3])multi_PEP_Combined_By_StORFs
+            calc_Second_only_core(groups, cores, data[1])
         for cluster, data in combined_pangenome_clusters_ONLY_Second_Type.items():
             if data[1] >= 2:
-
-                calc_only_StORF_only_core(groups, cores, data[1])  # ,numbers[3])
+                calc_only_Second_only_core(groups, cores, data[1])
     ###########################
     print("End")
     key_order = ['first_core_', 'extended_core_', 'combined_core_', 'second_core_','only_second_core_']
@@ -396,8 +519,8 @@ def cluster(options):
             if key.startswith(key_prefix):
                 print(f"{key}: {value}")
 
-    if options.coinfinder_out != None:
-        print("")
+    if options.gene_presence_absence_out != None:
+        gene_presence_absence_output(options,genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
 
 def main():
@@ -406,10 +529,10 @@ def main():
     parser._action_groups.pop()
 
     required = parser.add_argument_group('Required Arguments')
-    required.add_argument('-c', action='store', dest='clusters', help='Clustering output file from CD-HIT, DIAMOND or MMseqs2',
+    required.add_argument('-c', action='store', dest='clusters', help='Clustering output file from CD-HIT, TSV or CSV Edge List',
                         required=True)
-    required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'DIAMOND', 'MMseqs2'],
-                        help='Default - "CD-HIT": Which clustering algorithm used (CD-HIT, DIAMOND or MMseqs2)', required=True)
+    required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'CSV', 'TSV'],
+                        help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))', required=True)
 
 
     optional = parser.add_argument_group('Optional Arguments')
@@ -419,7 +542,7 @@ def main():
                         required=False)
     optional.add_argument('-groups', action="store", dest='core_groups', default="99,80,15",
                         help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
-    optional.add_argument('-cf', action='store', dest='coinfinder_out', help='Default - No Coinfinder output: File name to be used for Coinfinder data output',
+    optional.add_argument('-gpa', action='store', dest='gene_presence_absence_out', help='Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools',
                         required=False)
 
     misc = parser.add_argument_group('Misc')
@@ -438,6 +561,13 @@ def main():
 
     if options.sequence_tag == None:
         options.sequence_tag = 'StORF'
+
+    options.clusters = os.path.normpath(options.clusters)
+    options.clusters = os.path.realpath(options.clusters)
+    if options.reclustered:
+        options.reclustered = os.path.normpath(options.reclustered)
+        options.reclustered = os.path.realpath(options.reclustered)
+
 
     options.core_groups = options.core_groups + ',0'
 
