@@ -57,6 +57,27 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
     #         edge_list_outfile.write(line + '\n')
 
 
+def wrap_sequence(sequence, width=60):
+    wrapped_sequence = []
+    for i in range(0, len(sequence), width):
+        wrapped_sequence.append(sequence[i:i + width])
+    return "\n".join(wrapped_sequence)
+
+
+def read_fasta(fasta_file):
+    sequences = {}
+    current_sequence = None
+    with open(fasta_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue  # Skip empty lines
+            if line.startswith('>'):
+                current_sequence = line[1:]  # Remove '>' character
+                sequences[current_sequence] = ''
+            else:
+                sequences[current_sequence] += line
+    return sequences
 
 
 def reorder_dict_by_keys(original_dict, sorted_keys):
@@ -77,25 +98,25 @@ def get_cores(options,genome_dict):
             first = False
         prev_top = calculated_floor
         first_core_group = 'first_core_' + group
-        cores[first_core_group] = 0
+        cores[first_core_group] = []
         if options.reclustered != None:
             extended_core_group = 'extended_core_' + group
-            cores[extended_core_group] = 0
+            cores[extended_core_group] = []
             combined_core_group = 'combined_core_' + group
-            cores[combined_core_group] = 0
+            cores[combined_core_group] = []
             second_core_group = 'second_core_' + group
-            cores[second_core_group] = 0
+            cores[second_core_group] = []
             only_second_core_group = 'only_second_core_' + group
-            cores[only_second_core_group] = 0
+            cores[only_second_core_group] = []
     return cores, groups
 
 #@profile
-def calc_First_only_core(pep_num, groups, cores):
+def calc_First_only_core(cluster, pep_num, groups, cores):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num <= fir):
         res = idx
     family_group = list(groups)[res]
-    cores['first_core_'+family_group] +=1
+    cores['first_core_'+family_group].append(cluster)
 
 #@profile
 def calc_single_First_extended_Second_only_core(pep_num, groups, cores, second_num): # Count gene families extended with StORFs
@@ -103,7 +124,7 @@ def calc_single_First_extended_Second_only_core(pep_num, groups, cores, second_n
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= pep_num+second_num <= fir):
         res = idx
     family_group = list(groups)[res]
-    cores['extended_core_' + family_group] += 1
+    cores['extended_core_' + family_group].append(pep_num)
 
 
 #@profile
@@ -484,10 +505,10 @@ def cluster(options):
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
     ############################### Calculate First only
         if numbers[0] == 1 and numbers[1] >=2:
-            calc_First_only_core(numbers[1],groups,cores)
+            calc_First_only_core(cluster, numbers[1],groups,cores)
             counter +=1
         elif numbers[0] >1 and numbers[1] >=2:
-            calc_First_only_core(numbers[2][0],groups,cores)
+            calc_First_only_core(cluster, numbers[2][0],groups,cores)
             counter += 1
 
     if options.reclustered != None:
@@ -517,10 +538,34 @@ def cluster(options):
     for key_prefix in key_order:
         for key, value in cores.items():
             if key.startswith(key_prefix):
-                print(f"{key}: {value}")
+                print(f"{key}: {len(value)}")
 
     if options.gene_presence_absence_out != None:
         gene_presence_absence_output(options,genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
+
+    if options.write_families != None and options.fasta != None:
+        sequences = read_fasta(options.fasta)
+        input_dir = os.path.dirname(os.path.abspath(options.clusters))
+        output_dir = os.path.join(input_dir, 'Gene_Families_Output')
+
+        # Create output directory if it doesn't exist
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        for key_prefix in key_order:
+            for key, values in cores.items():
+                if any(part in options.write_families.split(',') for part in key.split('_')):
+                    if key.startswith(key_prefix):
+                        for value in values:
+                            output_filename = f"{key}_{value}.fasta"
+                            sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
+                            # Write sequences to output file that are in the sequences dictionary
+                            with open(os.path.join(output_dir, output_filename), 'w') as outfile:
+                                for header in sequences_to_write:
+                                    if header in sequences:
+                                        outfile.write(f">{header}\n")
+                                        wrapped_sequence = wrap_sequence(sequences[header])
+                                        outfile.write(f"{wrapped_sequence}\n")
+
 
 
 def main():
@@ -534,13 +579,20 @@ def main():
     required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'CSV', 'TSV'],
                         help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))', required=True)
 
+    output_args = parser.add_argument_group('Output Parameters')
+    output_args.add_argument('-w', action="store", dest='write_families', default="99",
+                          help='Default - No output: Output sequences of identified families (provide levels at which to output "-w 99 95"'
+                               ' - Must provide FASTA file with -fasta')
+    output_args.add_argument('-fasta', action='store', dest='fasta',
+                          help='FASTA file to use in conjunction with "-w"',
+                          required=False)
 
     optional = parser.add_argument_group('Optional Arguments')
     optional.add_argument('-rc', action='store', dest='reclustered', help='Clustering output file from secondary round of clustering',
                         required=False)
     optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
                         required=False)
-    optional.add_argument('-groups', action="store", dest='core_groups', default="99,80,15",
+    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,90,80,15",
                         help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
     optional.add_argument('-gpa', action='store', dest='gene_presence_absence_out', help='Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools',
                         required=False)
@@ -562,6 +614,11 @@ def main():
     if options.sequence_tag == None:
         options.sequence_tag = 'StORF'
 
+
+    if options.write_families != None and options.fasta == False:
+        exit("-fasta must br provided if -w is used")
+
+
     options.clusters = os.path.normpath(options.clusters)
     options.clusters = os.path.realpath(options.clusters)
     if options.reclustered:
@@ -572,6 +629,10 @@ def main():
     options.core_groups = options.core_groups + ',0'
 
     cluster(options)
+
+
+
+
 
     print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
           "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")

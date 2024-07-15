@@ -16,7 +16,37 @@ PyamilySeq requires Python 3.6 or higher. Install dependencies using pip:
 pip install PyamilySeq
 ```
 
-## Usage
+## Usage - Menu
+```
+PyamilySeq_Species.py -h
+usage: PyamilySeq_Species.py [-h] -c CLUSTERS -f {CD-HIT,CSV,TSV} [-w WRITE_FAMILIES] [-fasta FASTA] [-rc RECLUSTERED] [-st SEQUENCE_TAG]
+                             [-groups CORE_GROUPS] [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}] [-v]
+
+PyamilySeq v0.2.0: PyamilySeq Run Parameters.
+
+Required Arguments:
+  -c CLUSTERS           Clustering output file from CD-HIT, TSV or CSV Edge List
+  -f {CD-HIT,CSV,TSV}   Which format to use (CD-HIT or Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))
+
+Output Parameters:
+  -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99 95" - Must provide
+                        FASTA file with -fasta
+  -fasta FASTA          FASTA file to use in conjunction with "-w"
+
+Optional Arguments:
+  -rc RECLUSTERED       Clustering output file from secondary round of clustering
+  -st SEQUENCE_TAG      Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences
+  -groups CORE_GROUPS   Default - ('99,95,90,80,15'): Gene family groups to use
+  -gpa GENE_PRESENCE_ABSENCE_OUT
+                        Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other
+                        downstream tools
+
+Misc:
+  -verbose {True,False}
+                        Default - False: Print out runtime messages
+  -v                    Default - False: Print out version number and exit
+
+```
 
 ### Clustering Analysis
 
@@ -43,6 +73,7 @@ Replace `reclustered_file` with the path to the file containing additional seque
 PyamilySeq generates various outputs, including:
 
 - **Gene Presence-Absence File**: This CSV file details the presence and absence of genes across genomes.
+- **FASTA Files for Each Gene Family**:  
 
 ## Gene Family Groups
 
