@@ -6,6 +6,9 @@ import math
 import sys
 import argparse
 import os
+from tempfile import NamedTemporaryFile
+
+
 
 try:
     from .Constants import *
@@ -19,6 +22,75 @@ def custom_sort_key(k, dict1, dict2):
 def sort_keys_by_values(dict1, dict2):
     sorted_keys = sorted(dict1.keys(), key=lambda k: custom_sort_key(k, dict1, dict2), reverse=True)
     return sorted_keys
+
+def select_longest_gene(sequences):
+    """Select the longest sequence for each genome."""
+    longest_sequences = {}
+    for seq_id, sequence in sequences.items():
+        genome = seq_id.split('|')[0]  # Assuming genome name can be derived from the sequence ID
+        if genome not in longest_sequences or len(sequence) > len(longest_sequences[genome][1]):
+            longest_sequences[genome] = (seq_id, sequence)
+    return longest_sequences
+
+
+def run_mafft_on_sequences(sequences, output_file):
+    """Run mafft on the given sequences and write to output file."""
+    # Create a temporary input file for mafft
+    with NamedTemporaryFile('w', delete=False) as temp_input_file:
+        for header, sequence in sequences.items():
+            temp_input_file.write(f">{header}\n{sequence}\n")
+        temp_input_file_path = temp_input_file.name
+
+    # Run mafft
+    try:
+        with open(output_file, 'w') as output_f:
+            subprocess.run(
+                ['mafft', '--auto', temp_input_file_path],
+                stdout=output_f,
+                stderr=subprocess.DEVNULL,  # Suppress stderr
+                check=True
+            )
+    finally:
+        os.remove(temp_input_file_path)  # Clean up the temporary file
+
+
+def process_gene_families(directory, output_file):
+    """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
+    concatenated_sequences = {}
+    output_file = directory.replace('Gene_Families_Output',output_file)
+
+    # Iterate over each gene family file
+    for gene_file in os.listdir(directory):
+        if gene_file.endswith('.fasta'):
+            gene_path = os.path.join(directory, gene_file)
+
+            # Read sequences from the gene family file
+            sequences = read_fasta(gene_path)
+
+            # Select the longest sequence for each genome
+            longest_sequences = select_longest_gene(sequences)
+
+            # Run mafft on the longest sequences
+            aligned_file = f"{gene_file}_aligned.fasta"
+            run_mafft_on_sequences({seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
+
+            # Read aligned sequences and concatenate them
+            aligned_sequences = read_fasta(aligned_file)
+            for genome, aligned_seq in aligned_sequences.items():
+                genome_name = genome.split('|')[0]
+                if genome_name not in concatenated_sequences:
+                    concatenated_sequences[genome_name] = ""
+                concatenated_sequences[genome_name] += aligned_seq
+
+            # Clean up aligned file
+            os.remove(aligned_file)
+
+    # Write the concatenated sequences to the output file
+    with open(output_file, 'w') as out:
+        for genome, sequence in concatenated_sequences.items():
+            out.write(f">{genome}\n")
+            wrapped_sequence = wrap_sequence(sequence, 60)
+            out.write(f"{wrapped_sequence}\n")
 
 def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
@@ -92,7 +164,11 @@ def get_cores(options,genome_dict):
     for group in options.core_groups.split(','):
         calculated_floor = math.floor(int(group) / 100 * len(genome_dict))
         if first == False:
-            groups[group] = (calculated_floor,prev_top -1)
+            # Ensure no overlap
+            # if calculated_floor <= prev_top:
+            #     calculated_floor = prev_top - 1
+
+            groups[group] = (calculated_floor,prev_top)
         else:
             groups[group] = (calculated_floor, prev_top)
             first = False
@@ -209,28 +285,28 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
 
 #@profile
 def single_clustering_counting(options, pangenome_clusters_First, reps):
-    num_clustered_PEP = defaultdict(list)
-    recorded_PEP = []
+    num_clustered_First = defaultdict(list)
+    recorded_First = []
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
     list_of_reps = list(reps.keys())
-    for cluster, pep_genomes in pangenome_clusters_First.items():
+    for cluster, First_genomes in pangenome_clusters_First.items():
         rep = list_of_reps[int(cluster)]  # get the rep of the current pep cluster
 
         try:  # get the cluster from the storf clusters which contains this rep
-            num_clustered_PEP[cluster].append(rep + '_' + str(len(pep_genomes)))
-            size_of_pep_clusters = []
-            peps = num_clustered_PEP[cluster]
-            for pep in peps:
-                pep = pep.rsplit('_', 1)
-                size_of_pep_clusters.append(int(pep[1]))
-                recorded_PEP.append(pep[0])
-            pangenome_clusters_Type[cluster] = [len(num_clustered_PEP[cluster]), sum(size_of_pep_clusters),
-                                                size_of_pep_clusters, 0, 0, 0]
+            num_clustered_First[cluster].append(rep + '_' + str(len(First_genomes)))
+            size_of_First_clusters = []
+            Firsts = num_clustered_First[cluster]
+            for First in Firsts:
+                First = First.rsplit('_', 1)
+                size_of_First_clusters.append(int(First[1]))
+                recorded_First.append(First[0])
+            pangenome_clusters_Type[cluster] = [len(num_clustered_First[cluster]), sum(size_of_First_clusters),
+                                                size_of_First_clusters, 0, 0, 0]
 
         except KeyError:
             ###Singleton
-            num_pep_genomes = [len(pep_genomes)]
-            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, 0, 0, 0]
+            num_pep_genomes = [len(First_genomes)]
+            pangenome_clusters_Type[cluster] = [1, len(First_genomes), num_pep_genomes, 0, 0, 0]
 
     return pangenome_clusters_Type
 
@@ -493,7 +569,7 @@ def cluster(options):
         pangenome_clusters_Type = single_clustering_counting(options, pangenome_clusters_First, reps)
 
 
-    counter = 0
+
     Number_Of_StORF_Extending_But_Same_Genomes = 0
 
     sorted_first_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
@@ -504,12 +580,12 @@ def cluster(options):
     print("Calculating Groups")
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
     ############################### Calculate First only
-        if numbers[0] == 1 and numbers[1] >=2:
-            calc_First_only_core(cluster, numbers[1],groups,cores)
-            counter +=1
-        elif numbers[0] >1 and numbers[1] >=2:
-            calc_First_only_core(cluster, numbers[2][0],groups,cores)
-            counter += 1
+        #if numbers[0] == 1 and numbers[1] >=2:
+        calc_First_only_core(cluster, numbers[1],groups,cores)
+
+        # elif numbers[0] >1 and numbers[1] >=2:
+        #     calc_First_only_core(cluster, numbers[2][0],groups,cores)
+
 
     if options.reclustered != None:
         ############################# Calculate First and Reclustered-Second
@@ -532,13 +608,13 @@ def cluster(options):
             if data[1] >= 2:
                 calc_only_Second_only_core(groups, cores, data[1])
     ###########################
-    print("End")
     key_order = ['first_core_', 'extended_core_', 'combined_core_', 'second_core_','only_second_core_']
-    print("Gene Family Groups:")
+    print("Gene Groups:")
     for key_prefix in key_order:
         for key, value in cores.items():
             if key.startswith(key_prefix):
                 print(f"{key}: {len(value)}")
+    print("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
 
     if options.gene_presence_absence_out != None:
         gene_presence_absence_output(options,genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
@@ -566,6 +642,82 @@ def cluster(options):
                                         wrapped_sequence = wrap_sequence(sequences[header])
                                         outfile.write(f"{wrapped_sequence}\n")
 
+    if options.con_core != None and options.fasta != None and options.write_families != None:
+        process_gene_families(os.path.join(input_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
+
+
+        # groups_dir = os.path.join(input_dir, 'Gene_Families_Output')
+        # """Run mafft on all .fasta files in the given directory."""
+        # for filename in os.listdir(groups_dir):
+        #     if filename.endswith('.fasta'):
+        #         input_path = os.path.join(groups_dir, filename)
+        #         output_filename = filename.replace('.fasta', '_mafft.aln')
+        #         output_path = os.path.join(groups_dir, output_filename)
+        #
+        #         # Call mafft command
+        #         try:
+        #             with open(output_path, 'w') as output_file:
+        #                 subprocess.run(
+        #                     ['mafft', '--auto', input_path],
+        #                     stdout=output_file,
+        #                     stderr=subprocess.DEVNULL,  # Suppress stderr
+        #                     check=True
+        #                 )
+        #             print(f"Processed {input_path} -> {output_path}")
+        #         except subprocess.CalledProcessError as e:
+        #             print(f"Failed to process {input_path}: {e}")
+
+        ##This could be run once and not above AND here..
+        # output_dir = os.path.dirname(os.path.abspath(options.clusters))
+        # sequences = read_fasta(options.fasta)
+        # concatenated_sequences = {genome: '' for genome in genome_dict.keys()}
+        #
+        #
+        # for key_prefix in key_order:
+        #     for key, values in cores.items():
+        #         if any(part in options.con_core.split(',') for part in key.split('_')):
+        #             if key.startswith(key_prefix):
+        #                 for value in values:
+        #                     length_capture = {genome: [] for genome in genome_dict.keys()}
+        #                     sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
+        #                     for header in sequences_to_write:
+        #                         if header in sequences:
+        #                             length_capture[header.split('|')[0]].append([header,len(sequences[header])])
+        #                     if all(bool(values) for values in length_capture.values()): # If a GF is not present in 'ALL' genomes, do not add to concat
+        #                         for genome, lengths in length_capture.items():
+        #                             max_value = float('-inf')
+        #                             max_item = None
+        #                             for length in lengths:
+        #                                 current_value = length[1]
+        #                                 if current_value > max_value:
+        #                                     max_value = current_value
+        #                                     max_item = length[0]
+        #                             concatenated_sequences[genome.split('|')[0]] += sequences[max_item]
+        #
+        #
+        # with open(os.path.join(output_dir, 'core_concat.fasta'), 'w') as outfile:
+        #     for genome, sequence in concatenated_sequences.items():
+        #         outfile.write(f">{genome}\n")
+        #         wrapped_sequence = wrap_sequence(sequence)
+        #         outfile.write(f"{wrapped_sequence}\n")
+
+
+        # for core_gene_family in core_gene_families:
+        #     found_sequences = {genome: False for genome in genomes}
+        #
+        #     for fasta_file in fasta_files:
+        #         sequences = read_fasta(fasta_file)
+        #         for header, sequence in sequences.items():
+        #             genome = header.split('|')[0]
+        #             if genome in genomes and core_gene_family in header:
+        #                 concatenated_sequences[genome] += sequence
+        #                 found_sequences[genome] = True
+        #
+        #     for genome in genomes:
+        #         if not found_sequences[genome]:
+        #             concatenated_sequences[genome] += '-' * len(next(iter(sequences.values())))
+
+
 
 
 def main():
@@ -580,11 +732,14 @@ def main():
                         help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))', required=True)
 
     output_args = parser.add_argument_group('Output Parameters')
-    output_args.add_argument('-w', action="store", dest='write_families', default="99",
-                          help='Default - No output: Output sequences of identified families (provide levels at which to output "-w 99 95"'
+    output_args.add_argument('-w', action="store", dest='write_families', default=None,
+                          help='Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95"'
+                               ' - Must provide FASTA file with -fasta')
+    output_args.add_argument('-con', action="store", dest='con_core', default=None,
+                          help='Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to output "-w 99,95"'
                                ' - Must provide FASTA file with -fasta')
     output_args.add_argument('-fasta', action='store', dest='fasta',
-                          help='FASTA file to use in conjunction with "-w"',
+                          help='FASTA file to use in conjunction with "-w" or "-con"',
                           required=False)
 
     optional = parser.add_argument_group('Optional Arguments')
@@ -592,8 +747,8 @@ def main():
                         required=False)
     optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
                         required=False)
-    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,90,80,15",
-                        help='Default - (\'99,95,90,80,15\'): Gene family groups to use')
+    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,15",
+                        help='Default - (\'99,95,15\'): Gene family groups to use')
     optional.add_argument('-gpa', action='store', dest='gene_presence_absence_out', help='Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools',
                         required=False)
 
@@ -614,6 +769,11 @@ def main():
     if options.sequence_tag == None:
         options.sequence_tag = 'StORF'
 
+    if options.con_core == True:
+        if is_tool_installed('mafft'):
+            print("mafft is installed. Proceeding with alignment.")
+        else:
+            print("mafft is not installed. Please install mafft to proceed.")
 
     if options.write_families != None and options.fasta == False:
         exit("-fasta must br provided if -w is used")
@@ -643,5 +803,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    print("Complete")
+    print("Done")
 

@@ -1,4 +1,4 @@
-# PyamilySeq
+# PyamilySeq - !BETA!
 PyamilySeq (Family Seek) is a Python tool for clustering gene sequences into families based on sequence similarity identified by tools such as CD-HIT, DIAMOND or MMseqs2.
 This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter publication in NAR (https://doi.org/10.1093/nar/gkad814).
 
@@ -18,25 +18,26 @@ pip install PyamilySeq
 
 ## Usage - Menu
 ```
-PyamilySeq_Species.py -h
-usage: PyamilySeq_Species.py [-h] -c CLUSTERS -f {CD-HIT,CSV,TSV} [-w WRITE_FAMILIES] [-fasta FASTA] [-rc RECLUSTERED] [-st SEQUENCE_TAG]
+usage: PyamilySeq_Species.py [-h] -c CLUSTERS -f {CD-HIT,CSV,TSV} [-w WRITE_FAMILIES] [-con CON_CORE] [-fasta FASTA] [-rc RECLUSTERED] [-st SEQUENCE_TAG]
                              [-groups CORE_GROUPS] [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}] [-v]
 
-PyamilySeq v0.2.0: PyamilySeq Run Parameters.
+PyamilySeq v0.3.0: PyamilySeq Run Parameters.
 
 Required Arguments:
   -c CLUSTERS           Clustering output file from CD-HIT, TSV or CSV Edge List
   -f {CD-HIT,CSV,TSV}   Which format to use (CD-HIT or Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))
 
 Output Parameters:
-  -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99 95" - Must provide
-                        FASTA file with -fasta
-  -fasta FASTA          FASTA file to use in conjunction with "-w"
+  -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95" - Must provide FASTA file
+                        with -fasta
+  -con CON_CORE         Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to
+                        output "-w 99,95" - Must provide FASTA file with -fasta
+  -fasta FASTA          FASTA file to use in conjunction with "-w" or "-con"
 
 Optional Arguments:
   -rc RECLUSTERED       Clustering output file from secondary round of clustering
   -st SEQUENCE_TAG      Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences
-  -groups CORE_GROUPS   Default - ('99,95,90,80,15'): Gene family groups to use
+  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
   -gpa GENE_PRESENCE_ABSENCE_OUT
                         Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other
                         downstream tools
@@ -45,6 +46,7 @@ Misc:
   -verbose {True,False}
                         Default - False: Print out runtime messages
   -v                    Default - False: Print out version number and exit
+
 
 ```
 
