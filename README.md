@@ -1,16 +1,19 @@
 # PyamilySeq - !BETA!
-PyamilySeq (Family Seek) is a Python tool for clustering gene sequences into families based on sequence similarity identified by tools such as CD-HIT, DIAMOND or MMseqs2.
+**PyamilySeq** (Family Seek) is a Python tool for clustering gene sequences into families based on sequence similarity identified by tools such as CD-HIT, BLAST, DIAMOND or MMseqs2.
 This work is an extension of the gene family / pangenome tool developed for the StORF-Reporter publication in NAR (https://doi.org/10.1093/nar/gkad814).
 
 ## Features
 
-- **Clustering**: Supports input from CD-HIT formatted files as well as TSV and CSV Edge List formats.
+- **Clustering**: Supports input from CD-HIT formatted files as well as CSV and TSV edge lists (-outfmt 6 from BLAST/DIAMOND).
 - **Reclustering**: Allows for the addition of new sequences post-initial clustering.
-- **Output**: Generates a gene 'Roary' presence-absence CSV formatted file for downstream analysis.
+- **Output**: Generates a gene 'Roary/Panaroo' formatted presence-absence CSV formatted file for downstream analysis.
+  - Align representative sequences using MAFFT.
+  - Output concatenated aligned sequences for downstream analysis.
+  - Optionally output sequences of identified families.
 
-## Installation
 
-PyamilySeq requires Python 3.6 or higher. Install dependencies using pip:
+### Installation
+PyamilySeq requires Python 3.6 or higher. Install using pip:
 
 ```bash
 pip install PyamilySeq
@@ -49,40 +52,53 @@ Misc:
 
 
 ```
-
-### Clustering Analysis
-
-To perform clustering analysis:
+### Example Run
 
 ```bash
-python pyamilyseq.py -c clusters_file -f format
+python pyamilyseq.py -c ..test_data/CD-HIT/combined_Ensmbl_pep_CD_90_60.clstr -f CD-HIT
 ```
 
-Replace `clusters_file` with the path to your clustering output file and `format` with one of: `CD-HIT`, `CSV`, or `TSV`.
+```Calculating Groups
+Gene Groups:
+first_core_99: 3099
+first_core_95: 0
+first_core_15: 3208
+first_core_0: 4988
+Total Number of Gene Groups (Including Singletons): 11295
+Outputting gene_presence_absence file
+Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq
+Please report any issues to: https://github.com/NickJD/PyamilySeq/issues
+#####
+Done
+```
 
-### Reclustering
 
-To add new sequences and recluster:
+
+### Command Line Arguments
+
+#### Required Arguments
+- `-c <clusters_file>`: Clustering output file from CD-HIT, TSV, or CSV Edge List.
+- `-f <format>`: Format of the clustering output file. Choices are 'CD-HIT', 'CSV', or 'TSV'.
+
+#### Output Parameters
+- `-w <levels>`: Output sequences of identified families at specified levels. Must provide a FASTA file with `-fasta`. Example: `-w 99,95`
+- `-con <levels>`: Output aligned and concatenated sequences of identified families for MSA at specified levels. Must provide a FASTA file with `-fasta`. Example: `-con 99,95`
+- `-fasta <file>`: FASTA file to use in conjunction with `-w` or `-con`.
+
+#### Optional Arguments
+- `-rc <file>`: Clustering output file from a secondary round of clustering.
+- `-st <tag>`: Unique identifier to distinguish the second of two rounds of clustered sequences. Default is 'StORF'.
+- `-groups <groups>`: Gene family groups to use. Default is '99,95,15'.
+- `-gpa`: If selected, a Roary formatted `gene_presence_absence.csv` will be created. Required for Coinfinder and other downstream tools.
+
+#### Miscellaneous
+- `-verbose`: Print out runtime messages. Default is `False`.
+- `-v`: Print out version number and exit.
+
+### Advanced Example
 
 ```bash
-PyamilySeq -c clusters_file -f format --reclustered reclustered_file
+python pyamilyseq.py -c clusters.tsv -f TSV -w 99,95 -fasta sequences.fasta -verbose True
 ```
 
-Replace `reclustered_file` with the path to the file containing additional sequences.
-
-## Output
-
-PyamilySeq generates various outputs, including:
-
-- **Gene Presence-Absence File**: This CSV file details the presence and absence of genes across genomes.
-- **FASTA Files for Each Gene Family**:  
-
-## Gene Family Groups
-
-After analysis, PyamilySeq categorizes gene families into several groups:
-
-- **First Core**: Gene families present in all analysed genomes initially.
-- **Extended Core**: Gene families extended with additional sequences.
-- **Combined Core**: Gene families combined with both initial and additional sequences.
-- **Second Core**: Gene families identified only in the additional sequences.
-- **Only Second Core**: Gene families exclusively found in the additional sequences.
+This command processes the clustering output file `clusters.tsv` in TSV format, outputs sequences of identified families at levels 99 and 95, uses `sequences.fasta` as the input FASTA file, and enables verbose runtime messages.
