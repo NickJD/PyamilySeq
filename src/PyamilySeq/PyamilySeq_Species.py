@@ -729,15 +729,18 @@ def main():
     required.add_argument('-c', action='store', dest='clusters', help='Clustering output file from CD-HIT, TSV or CSV Edge List',
                         required=True)
     required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'CSV', 'TSV'],
-                        help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))', required=True)
+                        help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))',
+                        required=True)
 
     output_args = parser.add_argument_group('Output Parameters')
     output_args.add_argument('-w', action="store", dest='write_families', default=None,
                           help='Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95"'
-                               ' - Must provide FASTA file with -fasta')
+                               ' - Must provide FASTA file with -fasta',
+                          required=False)
     output_args.add_argument('-con', action="store", dest='con_core', default=None,
                           help='Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to output "-w 99,95"'
-                               ' - Must provide FASTA file with -fasta')
+                               ' - Must provide FASTA file with -fasta',
+                          required=False)
     output_args.add_argument('-fasta', action='store', dest='fasta',
                           help='FASTA file to use in conjunction with "-w" or "-con"',
                           required=False)
@@ -754,9 +757,11 @@ def main():
 
     misc = parser.add_argument_group('Misc')
     misc.add_argument('-verbose', action='store', dest='verbose', default=False, type=eval, choices=[True, False],
-                        help='Default - False: Print out runtime messages')
+                        help='Default - False: Print out runtime messages',
+                        required = False)
     misc.add_argument('-v', action='store_true', dest='version',
-                        help='Default - False: Print out version number and exit')
+                        help='Default - False: Print out version number and exit',
+                        required=False)
 
 
     options = parser.parse_args()

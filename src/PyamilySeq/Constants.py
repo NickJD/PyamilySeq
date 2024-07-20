@@ -1,6 +1,6 @@
 import subprocess
 
-PyamilySeq_Version = 'v0.3.0'
+PyamilySeq_Version = 'v0.4.0'
 
 
 
