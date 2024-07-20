@@ -722,7 +722,7 @@ def cluster(options):
 
 def main():
 
-    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': PyamilySeq Run Parameters.')
+    parser = argparse.ArgumentParser(description='PyamilySeq-Species ' + PyamilySeq_Version + ': PyamilySeq-Species Run Parameters.')
     parser._action_groups.pop()
 
     required = parser.add_argument_group('Required Arguments')
