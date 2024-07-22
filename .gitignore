@@ -162,3 +162,4 @@ cython_debug/
 
 
 test_data/CD-HIT/Gene_Families_Output/
+test_data/tmp/
