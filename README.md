@@ -32,7 +32,7 @@ usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species,Genus}
                      [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}]
                      [-v]
 
-PyamilySeq v0.5.0: PyamilySeq Run Parameters.
+PyamilySeq v0.5.1: PyamilySeq Run Parameters.
 
 options:
   -h, --help            show this help message and exit
@@ -41,9 +41,9 @@ Required Arguments:
   -run_mode {Full,Partial}
                         Run Mode: Should PyamilySeq be run in "Full" or
                         "Partial" mode?
-  -group_mode {Species,Genus}
+  -group_mode {Species}
                         Group Mode: Should PyamilySeq be run in "Species" or
-                        "Genus" mode?
+                        "Genus" mode?  - Genus mode not currently functioning
   -clust_tool {CD-HIT}  Clustering tool to use: CD-HIT, DIAMOND, BLAST or
                         MMseqs2.
   -output_dir OUTPUT_DIR
@@ -130,7 +130,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split _combined.gff3 -output
 ```bash
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name OUTPUT_FILE
 
-Seq-Combiner v0.5.0: Seq-Combiner Run Parameters.
+Seq-Combiner v0.5.1: Seq-Combiner Run Parameters.
 
 options:
   -h, --help            show this help message and exit

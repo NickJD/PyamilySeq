@@ -3,7 +3,7 @@ import collections
 import os
 import glob
 import subprocess
-from PyamilySeq_Species import *
+
 
 
 try:
@@ -43,8 +43,8 @@ def main():
     required.add_argument('-run_mode', action='store', dest='run_mode', choices=['Full','Partial'],
                           help='Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?',
                           required=True)
-    required.add_argument('-group_mode', action='store', dest='group_type', choices=['Species','Genus'],
-                          help='Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode?',
+    required.add_argument('-group_mode', action='store', dest='group_type', choices=['Species'],
+                          help='Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? - Genus mode not currently functioning',
                           required=True)
     required.add_argument("-clust_tool", action="store", dest="clust_tool", choices=['CD-HIT'],
                           help="Clustering tool to use: CD-HIT, DIAMOND, BLAST or MMseqs2.",
