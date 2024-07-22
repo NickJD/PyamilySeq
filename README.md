@@ -19,88 +19,6 @@ PyamilySeq requires Python 3.6 or higher. Install using pip:
 pip install PyamilySeq
 ```
 
-## Usage - Menu
-```
-usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species,Genus}
-                     -clust_tool {CD-HIT} -output_dir OUTPUT_DIR
-                     [-input_type {separate,combined}] [-input_dir INPUT_DIR]
-                     [-name_split NAME_SPLIT] [-pid PIDENT]
-                     [-len_diff LEN_DIFF] [-cluster_file CLUSTER_FILE]
-                     [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG]
-                     [-groups CORE_GROUPS] [-w WRITE_FAMILIES] [-con CON_CORE]
-                     [-original_fasta ORIGINAL_FASTA]
-                     [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}]
-                     [-v]
-
-PyamilySeq v0.5.1: PyamilySeq Run Parameters.
-
-options:
-  -h, --help            show this help message and exit
-
-Required Arguments:
-  -run_mode {Full,Partial}
-                        Run Mode: Should PyamilySeq be run in "Full" or
-                        "Partial" mode?
-  -group_mode {Species}
-                        Group Mode: Should PyamilySeq be run in "Species" or
-                        "Genus" mode?  - Genus mode not currently functioning
-  -clust_tool {CD-HIT}  Clustering tool to use: CD-HIT, DIAMOND, BLAST or
-                        MMseqs2.
-  -output_dir OUTPUT_DIR
-                        Directory for all output files.
-
-Full-Mode Arguments - Required when "-run_mode Full" is used:
-  -input_type {separate,combined}
-                        Type of input files: 'separate' for separate FASTA and
-                        GFF files, 'combined' for GFF files with embedded
-                        FASTA sequences.
-  -input_dir INPUT_DIR  Directory containing GFF/FASTA files.
-  -name_split NAME_SPLIT
-                        substring used to split the filename and extract the
-                        genome name ('_combined.gff3' or '.gff').
-  -pid PIDENT           Default 0.95: Pident threshold for clustering.
-  -len_diff LEN_DIFF    Default 0.80: Minimum length difference between
-                        clustered sequences - (-s) threshold for CD-HIT
-                        clustering.
-
-Partial-Mode Arguments - Required when "-run_mode Partial" is used:
-  -cluster_file CLUSTER_FILE
-                        Clustering output file containing CD-HIT, TSV or CSV
-                        Edge List
-
-Grouping Arguments - Use to fine-tune grouping of genes after clustering:
-  -reclustered RECLUSTERED
-                        Clustering output file from secondary round of
-                        clustering
-  -seq_tag SEQUENCE_TAG
-                        Default - "StORF": Unique identifier to be used to
-                        distinguish the second of two rounds of clustered
-                        sequences
-  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
-
-Output Parameters:
-  -w WRITE_FAMILIES     Default - No output: Output sequences of identified
-                        families (provide levels at which to output "-w 99,95"
-                        - Must provide FASTA file with -fasta
-  -con CON_CORE         Default - No output: Output aligned and concatinated
-                        sequences of identified families - used for MSA
-                        (provide levels at which to output "-w 99,95" - Must
-                        provide FASTA file with -fasta
-  -original_fasta ORIGINAL_FASTA
-                        FASTA file to use in conjunction with "-w" or "-con"
-                        when running in Partial Mode.
-  -gpa GENE_PRESENCE_ABSENCE_OUT
-                        Default - False: If selected, a Roary formatted
-                        gene_presence_absence.csv will be created - Required
-                        for Coinfinder and other downstream tools
-
-Misc:
-  -verbose {True,False}
-                        Default - False: Print out runtime messages
-  -v                    Default - False: Print out version number and exit
-
-```
-
 ### Examples: Below are two examples of running PyamilySeq in its two main modes.
 #### 'Full Mode': Will conduct clustering of sequences as part of PyamilySeq run
 ```bash 
@@ -121,6 +39,69 @@ first_core_0: 4808
 Total Number of Gene Groups (Including Singletons): 11128
 ```
 
+
+## Usage - Menu
+```
+usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species} -clust_tool {CD-HIT} -output_dir OUTPUT_DIR [-input_type {separate,combined}] [-input_dir INPUT_DIR] [-name_split NAME_SPLIT] [-pid PIDENT] [-len_diff LEN_DIFF] [-mem CLUSTERING_MEMORY] [-t CLUSTERING_THREADS] [-cluster_file CLUSTER_FILE]
+                     [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG] [-groups CORE_GROUPS] [-w WRITE_FAMILIES] [-con CON_CORE] [-original_fasta ORIGINAL_FASTA] [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}] [-v]
+
+PyamilySeq v0.5.2: PyamilySeq Run Parameters.
+
+options:
+  -h, --help            show this help message and exit
+
+Required Arguments:
+  -run_mode {Full,Partial}
+                        Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?
+  -group_mode {Species}
+                        Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? - Genus mode not currently functioning
+  -clust_tool {CD-HIT}  Clustering tool to use: CD-HIT, DIAMOND, BLAST or MMseqs2.
+  -output_dir OUTPUT_DIR
+                        Directory for all output files.
+
+Full-Mode Arguments - Required when "-run_mode Full" is used:
+  -input_type {separate,combined}
+                        Type of input files: 'separate' for separate FASTA and GFF files, 'combined' for GFF files with embedded FASTA sequences.
+  -input_dir INPUT_DIR  Directory containing GFF/FASTA files.
+  -name_split NAME_SPLIT
+                        substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').
+  -pid PIDENT           Default 0.95: Pident threshold for clustering.
+  -len_diff LEN_DIFF    Default 0.80: Minimum length difference between clustered sequences - (-s) threshold for CD-HIT clustering.
+
+Clustering Runtime Arguments - Optional when "-run_mode Full" is used:
+  -mem CLUSTERING_MEMORY
+                        Default 4000: Memory to be allocated for clustering (in MBs).
+  -t CLUSTERING_THREADS
+                        Default 4: Threads to be allocated for clustering.
+
+Partial-Mode Arguments - Required when "-run_mode Partial" is used:
+  -cluster_file CLUSTER_FILE
+                        Clustering output file containing CD-HIT, TSV or CSV Edge List
+
+Grouping Arguments - Use to fine-tune grouping of genes after clustering:
+  -reclustered RECLUSTERED
+                        Clustering output file from secondary round of clustering
+  -seq_tag SEQUENCE_TAG
+                        Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences
+  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
+
+Output Parameters:
+  -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95" - Must provide FASTA file with -fasta
+  -con CON_CORE         Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to output "-w 99,95" - Must provide FASTA file with -fasta
+  -original_fasta ORIGINAL_FASTA
+                        FASTA file to use in conjunction with "-w" or "-con" when running in Partial Mode.
+  -gpa GENE_PRESENCE_ABSENCE_OUT
+                        Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools
+
+Misc:
+  -verbose {True,False}
+                        Default - False: Print out runtime messages
+  -v                    Default - False: Print out version number and exit
+
+
+```
+
+
 ## Seq-Combiner: This tool is provided to enable the pre-processing of multiple GFF/FASTA files together ready to be clustered by the user
 ### Example:
 ```bash
@@ -130,7 +111,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split _combined.gff3 -output
 ```bash
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name OUTPUT_FILE
 
-Seq-Combiner v0.5.1: Seq-Combiner Run Parameters.
+Seq-Combiner v0.5.2: Seq-Combiner Run Parameters.
 
 options:
   -h, --help            show this help message and exit

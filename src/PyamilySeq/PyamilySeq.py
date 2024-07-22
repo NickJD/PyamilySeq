@@ -25,7 +25,8 @@ def run_cd_hit(input_file, clustering_output, options):
         '-o', clustering_output,
         '-c', str(options.pident),
         '-s', str(options.len_diff),
-        '-T', "20",
+        '-T', str(options.clustering_threads),
+        '-M', str(options.clustering_memory),
         '-d', "0",
         '-sc', "1",
         '-sf', "1"
@@ -70,7 +71,14 @@ def main():
     full_mode_args.add_argument("-len_diff", action="store", dest="len_diff", type=float, default=0.80,
                           help="Default 0.80: Minimum length difference between clustered sequences - (-s) threshold for CD-HIT clustering.",
                           required=False)
-
+    ###Clustering Arguments
+    clustering_args = parser.add_argument_group('Clustering Runtime Arguments - Optional when "-run_mode Full" is used')
+    clustering_args.add_argument("-mem", action="store", dest="clustering_memory", type=int, default=4000,
+                          help="Default 4000: Memory to be allocated for clustering (in MBs).",
+                          required=False)
+    clustering_args.add_argument("-t", action="store", dest="clustering_threads", type=int, default=4,
+                          help="Default 4: Threads to be allocated for clustering.",
+                          required=False)
 
     ###Partial-Mode Arguments
     partial_mode_args = parser.add_argument_group('Partial-Mode Arguments - Required when "-run_mode Partial" is used')
