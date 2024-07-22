@@ -111,7 +111,7 @@ PyamilySeq -run_mode Full -group_mode Species -output_dir ../../test_data/testin
 PyamilySeq -run_mode Partial -group_mode Species -output_dir .../test_data/testing -cluster_file .../test_data/CD-HIT/combined_Ensmbl_pep_CD_90_60.clstr -clust_tool CD-HIT -original_fasta .../test_data/combined_Ensmbl_cds.fasta -gpa True -con True -w 99 -verbose True
 ```
 
-```Calculating Groups
+```bash
 Calculating Groups
 Gene Groups:
 first_core_99: 3103
