@@ -104,7 +104,7 @@ Misc:
 ### Examples: Below are two examples of running PyamilySeq in its two main modes.
 #### 'Full Mode': Will conduct clustering of sequences as part of PyamilySeq run
 ```bash 
-PyamilySeq -id .../genomes -it combined -ns _combined.gff3 -pid 0.90 -ld 0.60 -co testing_cd-hit -ct CD-HIT -od .../testing
+PyamilySeq -run_mode Full -group_mode Species -output_dir ../../test_data/testing -input_type combined -input_dir .../test_data/genomes -name_split _combined.gff3 -pid 0.99 -len_diff 0.99 -clust_tool CD-HIT -gpa True -con True -w 99 -verbose True
 ```
 #### 'Partial Mode': Will take the output of a sequence clustering
 ```bash
