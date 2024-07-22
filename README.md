@@ -21,47 +21,94 @@ pip install PyamilySeq
 
 ## Usage - Menu
 ```
-usage: PyamilySeq.py [-h] -id INPUT_DIR -od OUTPUT_DIR -it {separate,combined} -ns NAME_SPLIT -pid PIDENT -ld LEN_DIFF -co CLUSTERING_OUT -ct {CD-HIT,BLAST,DIAMOND,MMseqs2} [-w WRITE_FAMILIES] [-con CON_CORE] [-fasta FASTA] [-rc RECLUSTERED] [-st SEQUENCE_TAG] [-groups CORE_GROUPS]
-                     [-gpa GENE_PRESENCE_ABSENCE_OUT]
-                     ...
+usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species,Genus}
+                     -clust_tool {CD-HIT} -output_dir OUTPUT_DIR
+                     [-input_type {separate,combined}] [-input_dir INPUT_DIR]
+                     [-name_split NAME_SPLIT] [-pid PIDENT]
+                     [-len_diff LEN_DIFF] [-cluster_file CLUSTER_FILE]
+                     [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG]
+                     [-groups CORE_GROUPS] [-w WRITE_FAMILIES] [-con CON_CORE]
+                     [-original_fasta ORIGINAL_FASTA]
+                     [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}]
+                     [-v]
 
-PyamilySeq v0.4.0: PyamilySeq Run Parameters.
-
-positional arguments:
-  pyamilyseq_args       Additional arguments for PyamilySeq.
+PyamilySeq v0.5.0: PyamilySeq Run Parameters.
 
 options:
   -h, --help            show this help message and exit
 
 Required Arguments:
-  -id INPUT_DIR         Directory containing GFF/FASTA files.
-  -od OUTPUT_DIR        Directory for all output files.
-  -it {separate,combined}
-                        Type of input files: 'separate' for separate FASTA and GFF files, 'combined' for GFF files with embedded FASTA sequences.
-  -ns NAME_SPLIT        Character used to split the filename and extract the genome name.
-  -pid PIDENT           Pident threshold for CD-HIT clustering.
-  -ld LEN_DIFF          Length difference (-s) threshold for CD-HIT clustering.
-  -co CLUSTERING_OUT    Output file for initial clustering.
-  -ct {CD-HIT,BLAST,DIAMOND,MMseqs2}
-                        Clustering format for PyamilySeq.
+  -run_mode {Full,Partial}
+                        Run Mode: Should PyamilySeq be run in "Full" or
+                        "Partial" mode?
+  -group_mode {Species,Genus}
+                        Group Mode: Should PyamilySeq be run in "Species" or
+                        "Genus" mode?
+  -clust_tool {CD-HIT}  Clustering tool to use: CD-HIT, DIAMOND, BLAST or
+                        MMseqs2.
+  -output_dir OUTPUT_DIR
+                        Directory for all output files.
+
+Full-Mode Arguments - Required when "-run_mode Full" is used:
+  -input_type {separate,combined}
+                        Type of input files: 'separate' for separate FASTA and
+                        GFF files, 'combined' for GFF files with embedded
+                        FASTA sequences.
+  -input_dir INPUT_DIR  Directory containing GFF/FASTA files.
+  -name_split NAME_SPLIT
+                        substring used to split the filename and extract the
+                        genome name ('_combined.gff3' or '.gff').
+  -pid PIDENT           Default 0.95: Pident threshold for clustering.
+  -len_diff LEN_DIFF    Default 0.80: Minimum length difference between
+                        clustered sequences - (-s) threshold for CD-HIT
+                        clustering.
+
+Partial-Mode Arguments - Required when "-run_mode Partial" is used:
+  -cluster_file CLUSTER_FILE
+                        Clustering output file containing CD-HIT, TSV or CSV
+                        Edge List
+
+Grouping Arguments - Use to fine-tune grouping of genes after clustering:
+  -reclustered RECLUSTERED
+                        Clustering output file from secondary round of
+                        clustering
+  -seq_tag SEQUENCE_TAG
+                        Default - "StORF": Unique identifier to be used to
+                        distinguish the second of two rounds of clustered
+                        sequences
+  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
 
 Output Parameters:
-  -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95" - Must provide FASTA file with -fasta
-  -con CON_CORE         Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to output "-w 99,95" - Must provide FASTA file with -fasta
-  -fasta FASTA          FASTA file to use in conjunction with "-w" or "-con"
-
-Optional Arguments:
-  -rc RECLUSTERED       Clustering output file from secondary round of clustering
-  -st SEQUENCE_TAG      Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences
-  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
+  -w WRITE_FAMILIES     Default - No output: Output sequences of identified
+                        families (provide levels at which to output "-w 99,95"
+                        - Must provide FASTA file with -fasta
+  -con CON_CORE         Default - No output: Output aligned and concatinated
+                        sequences of identified families - used for MSA
+                        (provide levels at which to output "-w 99,95" - Must
+                        provide FASTA file with -fasta
+  -original_fasta ORIGINAL_FASTA
+                        FASTA file to use in conjunction with "-w" or "-con"
+                        when running in Partial Mode.
   -gpa GENE_PRESENCE_ABSENCE_OUT
-                        Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools
+                        Default - False: If selected, a Roary formatted
+                        gene_presence_absence.csv will be created - Required
+                        for Coinfinder and other downstream tools
+
+Misc:
+  -verbose {True,False}
+                        Default - False: Print out runtime messages
+  -v                    Default - False: Print out version number and exit
+
 ```
 
-### Example Run End-to-End - 'genomes' is a test-directory containing GFF files with ##FASTA at the bottom
-
-```bash
+### Examples: Below are two examples of running PyamilySeq in its two main modes.
+#### 'Full Mode': Will conduct clustering of sequences as part of PyamilySeq run
+```bash 
 PyamilySeq -id .../genomes -it combined -ns _combined.gff3 -pid 0.90 -ld 0.60 -co testing_cd-hit -ct CD-HIT -od .../testing
+```
+#### 'Partial Mode': Will take the output of a sequence clustering
+```bash
+PyamilySeq -run_mode Partial -group_mode Species -output_dir .../test_data/testing -cluster_file .../test_data/CD-HIT/combined_Ensmbl_pep_CD_90_60.clstr -clust_tool CD-HIT -original_fasta .../test_data/combined_Ensmbl_cds.fasta -gpa True -con True -w 99 -verbose True
 ```
 
 ```Calculating Groups
@@ -74,4 +121,28 @@ first_core_0: 4808
 Total Number of Gene Groups (Including Singletons): 11128
 ```
 
+## Seq-Combiner: This tool is provided to enable the pre-processing of multiple GFF/FASTA files together ready to be clustered by the user
+### Example:
+```bash
+Seq-Combiner -input_dir .../test_data/genomes -name_split _combined.gff3 -output_dir.../test_data -output_name combine_fasta_seqs.fa -input_type combined
+```
+## Seq-Combiner Menu:
+```bash
+usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name OUTPUT_FILE
 
+Seq-Combiner v0.5.0: Seq-Combiner Run Parameters.
+
+options:
+  -h, --help            show this help message and exit
+
+Required Arguments:
+  -input_dir INPUT_DIR  Directory location where the files are located.
+  -input_type {separate,combined}
+                        Type of input files: 'separate' for separate FASTA and GFF files, 'combined' for GFF files with embedded FASTA sequences.
+  -name_split NAME_SPLIT
+                        substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').
+  -output_dir OUTPUT_DIR
+                        Directory for all output files.
+  -output_name OUTPUT_FILE
+                        Output file name.
+```

@@ -4,16 +4,16 @@ from collections import OrderedDict,defaultdict
 import copy
 import math
 import sys
-import argparse
-import os
 from tempfile import NamedTemporaryFile
 
 
 
 try:
     from .Constants import *
+    from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from Constants import *
+    from utils import *
 
 
 def custom_sort_key(k, dict1, dict2):
@@ -33,7 +33,7 @@ def select_longest_gene(sequences):
     return longest_sequences
 
 
-def run_mafft_on_sequences(sequences, output_file):
+def run_mafft_on_sequences(options, sequences, output_file):
     """Run mafft on the given sequences and write to output file."""
     # Create a temporary input file for mafft
     with NamedTemporaryFile('w', delete=False) as temp_input_file:
@@ -44,17 +44,25 @@ def run_mafft_on_sequences(sequences, output_file):
     # Run mafft
     try:
         with open(output_file, 'w') as output_f:
-            subprocess.run(
-                ['mafft', '--auto', temp_input_file_path],
-                stdout=output_f,
-                stderr=subprocess.DEVNULL,  # Suppress stderr
-                check=True
-            )
+            if options.verbose == 'True':
+                subprocess.run(
+                    ['mafft', '--auto', temp_input_file_path],
+                    stdout=output_f,
+                    stderr=sys.stderr,
+                    check=True
+                )
+            else:
+                subprocess.run(
+                    ['mafft', '--auto', temp_input_file_path],
+                    stdout=output_f,
+                    stderr=subprocess.DEVNULL,  # Suppress stderr
+                    check=True
+                )
     finally:
         os.remove(temp_input_file_path)  # Clean up the temporary file
 
 
-def process_gene_families(directory, output_file):
+def process_gene_families(options, directory, output_file):
     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
     concatenated_sequences = {}
     output_file = directory.replace('Gene_Families_Output',output_file)
@@ -72,7 +80,7 @@ def process_gene_families(directory, output_file):
 
             # Run mafft on the longest sequences
             aligned_file = f"{gene_file}_aligned.fasta"
-            run_mafft_on_sequences({seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
+            run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
 
             # Read aligned sequences and concatenate them
             aligned_sequences = read_fasta(aligned_file)
@@ -143,9 +151,9 @@ def read_fasta(fasta_file):
         for line in file:
             line = line.strip()
             if not line:
-                continue  # Skip empty lines
+                continue
             if line.startswith('>'):
-                current_sequence = line[1:]  # Remove '>' character
+                current_sequence = line[1:]
                 sequences[current_sequence] = ''
             else:
                 sequences[current_sequence] += line
@@ -384,9 +392,9 @@ def combined_clustering_CDHIT(options, genome_dict):
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, unique_genomes
 
 def combined_clustering_Edge_List(options, genome_dict):
-    if options.format == 'TSV':
+    if options.cluster_format == 'TSV':
         separator = '\t'
-    elif options.format == 'CSV':
+    elif options.cluster_format == 'CSV':
         separator = ','
     unique_genomes = []
     cluster_id = 0
@@ -463,9 +471,9 @@ def combined_clustering_Edge_List(options, genome_dict):
 
 
 def cluster_EdgeList(options):
-    if options.format == 'TSV':
+    if options.cluster_format == 'TSV':
         separator = '\t'
-    elif options.format == 'CSV':
+    elif options.cluster_format == 'CSV':
         separator = ','
     cluster_id = 0
     last_rep = ''
@@ -548,9 +556,9 @@ def cluster_CDHIT(options):
 #@profile
 def cluster(options):
 
-    if options.format == 'CD-HIT':
+    if options.cluster_format == 'CD-HIT':
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options)
-    elif options.format in ['TSV','CSV']:
+    elif options.cluster_format in ['TSV','CSV']:
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options)
 
     ######################################
@@ -558,10 +566,10 @@ def cluster(options):
     ###
 
     if options.reclustered != None:
-        if options.format == 'CD-HIT':
+        if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
                 unique_genomes = combined_clustering_CDHIT(options, genome_dict)
-        if options.format == 'TSV':
+        if options.cluster_format == 'TSV':
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,\
                 unique_genomes = combined_clustering_Edge_List(options, genome_dict)
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered)
@@ -570,7 +578,7 @@ def cluster(options):
 
 
 
-    Number_Of_StORF_Extending_But_Same_Genomes = 0
+    Number_Of_Second_Extending_But_Same_Genomes = 0
 
     sorted_first_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
     pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_first_keys)
@@ -594,7 +602,7 @@ def cluster(options):
         elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Secondss combined multiple Firsts
             calc_multi_First_extended_Second_only_core(numbers[1], groups, cores, numbers[3])
         elif numbers[4] >= 1:
-            Number_Of_StORF_Extending_But_Same_Genomes += 1
+            Number_Of_Second_Extending_But_Same_Genomes += 1
         combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
         combined_pangenome_clusters_Second_Type = defaultdict(list)
         for cluster, genomes in combined_pangenome_clusters_Second.items():
@@ -643,7 +651,7 @@ def cluster(options):
                                         outfile.write(f"{wrapped_sequence}\n")
 
     if options.con_core != None and options.fasta != None and options.write_families != None:
-        process_gene_families(os.path.join(input_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
+        process_gene_families(options, os.path.join(input_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
 
 
         # groups_dir = os.path.join(input_dir, 'Gene_Families_Output')
@@ -705,7 +713,7 @@ def cluster(options):
         # for core_gene_family in core_gene_families:
         #     found_sequences = {genome: False for genome in genomes}
         #
-        #     for fasta_file in fasta_files:
+        #     for fasta_file in fasta_files:f
         #         sequences = read_fasta(fasta_file)
         #         for header, sequence in sequences.items():
         #             genome = header.split('|')[0]
@@ -719,94 +727,4 @@ def cluster(options):
 
 
 
-
-def main():
-
-    parser = argparse.ArgumentParser(description='PyamilySeq-Species ' + PyamilySeq_Version + ': PyamilySeq-Species Run Parameters.')
-    parser._action_groups.pop()
-
-    required = parser.add_argument_group('Required Arguments')
-    required.add_argument('-c', action='store', dest='clusters', help='Clustering output file from CD-HIT, TSV or CSV Edge List',
-                        required=True)
-    required.add_argument('-f', action='store', dest='format', choices=['CD-HIT', 'CSV', 'TSV'],
-                        help='Which format to use (CD-HIT or  Comma/Tab Separated Edge-List (such as MMseqs2 tsv output))',
-                        required=True)
-
-    output_args = parser.add_argument_group('Output Parameters')
-    output_args.add_argument('-w', action="store", dest='write_families', default=None,
-                          help='Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95"'
-                               ' - Must provide FASTA file with -fasta',
-                          required=False)
-    output_args.add_argument('-con', action="store", dest='con_core', default=None,
-                          help='Default - No output: Output aligned and concatinated sequences of identified families - used for MSA (provide levels at which to output "-w 99,95"'
-                               ' - Must provide FASTA file with -fasta',
-                          required=False)
-    output_args.add_argument('-fasta', action='store', dest='fasta',
-                          help='FASTA file to use in conjunction with "-w" or "-con"',
-                          required=False)
-
-    optional = parser.add_argument_group('Optional Arguments')
-    optional.add_argument('-rc', action='store', dest='reclustered', help='Clustering output file from secondary round of clustering',
-                        required=False)
-    optional.add_argument('-st', action='store', dest='sequence_tag', help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
-                        required=False)
-    optional.add_argument('-groups', action="store", dest='core_groups', default="99,95,15",
-                        help='Default - (\'99,95,15\'): Gene family groups to use')
-    optional.add_argument('-gpa', action='store', dest='gene_presence_absence_out', help='Default - False: If selected, a Roary formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools',
-                        required=False)
-
-    misc = parser.add_argument_group('Misc')
-    misc.add_argument('-verbose', action='store', dest='verbose', default=False, type=eval, choices=[True, False],
-                        help='Default - False: Print out runtime messages',
-                        required = False)
-    misc.add_argument('-v', action='store_true', dest='version',
-                        help='Default - False: Print out version number and exit',
-                        required=False)
-
-
-    options = parser.parse_args()
-    if options.clusters == None or options.format == None:
-        if options.version:
-            sys.exit(PyamilySeq_Version)
-        else:
-            exit('PyamilySeq: error: the following arguments are required: -c, -f')
-
-    if options.sequence_tag == None:
-        options.sequence_tag = 'StORF'
-
-    if options.con_core == True:
-        if is_tool_installed('mafft'):
-            print("mafft is installed. Proceeding with alignment.")
-        else:
-            print("mafft is not installed. Please install mafft to proceed.")
-
-    if options.write_families != None and options.fasta == False:
-        exit("-fasta must br provided if -w is used")
-
-
-    options.clusters = os.path.normpath(options.clusters)
-    options.clusters = os.path.realpath(options.clusters)
-    if options.reclustered:
-        options.reclustered = os.path.normpath(options.reclustered)
-        options.reclustered = os.path.realpath(options.reclustered)
-
-
-    options.core_groups = options.core_groups + ',0'
-
-    cluster(options)
-
-
-
-
-
-    print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
-          "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")
-
-
-
-
-
-if __name__ == "__main__":
-    main()
-    print("Done")
 
