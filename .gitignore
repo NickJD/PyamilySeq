@@ -160,4 +160,5 @@ cython_debug/
 #.idea/
 
 
-PyamilySeq/test_data/CD-HIT/Gene_Families_Output
+
+test_data/CD-HIT/Gene_Families_Output/
