@@ -18,7 +18,7 @@ def cluster_CDHIT(options, splitter):
     ## Load in all data for easier reuse later
     for line in First_in:
         if '>Cluster 7575' in line:
-            print(23)
+            print()
         if line.startswith('>'):
             if first == False:
                 cluster_size = len(clusters[cluster_id])
@@ -148,8 +148,6 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
     first = True
     for line in Second_in:
         if line.startswith('>'):
-            if line.startswith('>Cluster 7575'):
-                print("")
             if first == False:
                 cluster_size = len(Combined_clusters[cluster_id])
                 Combined_reps.update({rep: cluster_size})

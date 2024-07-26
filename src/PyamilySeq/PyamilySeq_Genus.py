@@ -57,8 +57,10 @@ def process_gene_families(options, directory, output_file):
 
 def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
-    in_name = options.clusters.split('.')[0]
-    gpa_outfile = open(in_name+'_gene_presence_absence.csv','w')
+    output_dir = os.path.abspath(options.output_dir)
+    in_name = options.clusters.split('.')[0].split('/')[-1]
+    gpa_outfile = os.path.join(output_dir, in_name)
+    gpa_outfile = open(gpa_outfile+'_gene_presence_absence.csv','w')
     gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
     gpa_outfile.write('","'.join(genus_dict.keys()))
@@ -68,14 +70,17 @@ def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_s
         gpa_outfile.write('"group_'+str(cluster)+'","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
                          '","","","","","","","","",""')
 
-        full_out = ''
-        for genome in genus_dict.keys():
+
+        for genus in genus_dict.keys():
+            full_out = ''
             tmp_list = []
             for value in sequences:
-                if value.split('|')[0] == genome:
+                if value.split('_')[0] == genus:
                     tmp_list.append(value)
             if tmp_list:
                 full_out += ',"'+''.join(tmp_list)+'"'
+            else:
+                full_out = ',""'
             gpa_outfile.write(full_out)
         gpa_outfile.write('\n')
 
@@ -185,41 +190,48 @@ def cluster(options):
     ############################### Calculate First only
         calc_First_only_core(cluster, numbers[1], cores)
 
-        if options.reclustered != None:
-            ############################# Calculate First and Reclustered-Second
-            if numbers[0] == 1 and numbers[3] >= 1:  # If Seconds did not combine First reps
-                calc_single_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
-            elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Secondss combined multiple Firsts
-                calc_multi_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
-            elif numbers[4] >= 1:
-                Number_Of_StORF_Extending_But_Same_Genomes += 1
+    if options.reclustered != None:
+        ############################# Calculate First and Reclustered-Second
+        if numbers[0] == 1 and numbers[3] >= 1:  # If Seconds did not combine First reps
+            calc_single_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
+        elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Secondss combined multiple Firsts
+            calc_multi_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
+        elif numbers[4] >= 1:
+            Number_Of_StORF_Extending_But_Same_Genomes += 1
 
-    combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
-    combined_pangenome_clusters_Second_Type = defaultdict(list)
-    for cluster, genomes in combined_pangenome_clusters_Second.items():
-        if cluster in not_Second_only_cluster_ids:
-            combined_pangenome_clusters_Second_Type[cluster] = [cluster, len(genomes)]
-        else:
-            combined_pangenome_clusters_ONLY_Second_Type[cluster] = [cluster, len(genomes)]
-    for cluster, data in combined_pangenome_clusters_Second_Type.items():
-        calc_Second_only_core(cluster, cores, data[1])
-    for cluster, data in combined_pangenome_clusters_ONLY_Second_Type.items():
-        if data[1] >= 2:
-            calc_only_Second_only_core(cluster,  cores, data[1])
+        combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
+        combined_pangenome_clusters_Second_Type = defaultdict(list)
+        for cluster, genomes in combined_pangenome_clusters_Second.items():
+            if cluster in not_Second_only_cluster_ids:
+                combined_pangenome_clusters_Second_Type[cluster] = [cluster, len(genomes)]
+            else:
+                combined_pangenome_clusters_ONLY_Second_Type[cluster] = [cluster, len(genomes)]
+        for cluster, data in combined_pangenome_clusters_Second_Type.items():
+            if data[1] >=1:
+                calc_Second_only_core(cluster, cores, data[1])
+        for cluster, data in combined_pangenome_clusters_ONLY_Second_Type.items():
+            if data[1] >= 1 :
+                calc_only_Second_only_core(cluster,  cores, data[1])
     ###########################
-    key_order = list(cores.keys())#['first_core_', 'extended_core_', 'combined_core_', 'second_core_','only_second_core_']
-    print("Genus Groups:")
-    for key in key_order:
-        print(key+':\t'+str(len(cores[key])))
-    print("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
+    ### Output
+    key_order = list(cores.keys())
+    output_path = os.path.abspath(options.output_dir)
+    stats_out = os.path.join(output_path,'summary_statistics.txt')
+    with open(stats_out,'w') as outfile:
+        print("Genus Groups:")
+        outfile.write("Genus Groups:\n")
+        for key in key_order:
+            print(key+':\t'+str(len(cores[key])))
+            outfile.write(key + ':\t' + str(len(cores[key]))+'\n')
+        print("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
+        outfile.write("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
 
     if options.gene_presence_absence_out != None:
         gene_presence_absence_output(options,genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
     if options.write_families != None and options.fasta != None:
         sequences = read_fasta(options.fasta)
-        input_dir = os.path.dirname(os.path.abspath(options.clusters))
-        output_dir = os.path.join(input_dir, 'Gene_Families_Output')
+        output_dir = os.path.join(output_path, 'Gene_Families_Output')
 
         # Create output directory if it doesn't exist
         if not os.path.exists(output_dir):
@@ -240,7 +252,7 @@ def cluster(options):
                                         outfile.write(f"{wrapped_sequence}\n")
 
     if options.con_core != None and options.fasta != None and options.write_families != None:
-        process_gene_families(options, os.path.join(input_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
+        process_gene_families(options, os.path.join(output_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
 
 
 

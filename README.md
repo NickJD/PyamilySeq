@@ -42,10 +42,11 @@ Total Number of Gene Groups (Including Singletons): 11128
 
 ## Usage - Menu
 ```
-usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species} -clust_tool {CD-HIT} -output_dir OUTPUT_DIR [-input_type {separate,combined}] [-input_dir INPUT_DIR] [-name_split NAME_SPLIT] [-pid PIDENT] [-len_diff LEN_DIFF] [-mem CLUSTERING_MEMORY] [-t CLUSTERING_THREADS] [-cluster_file CLUSTER_FILE]
-                     [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG] [-groups CORE_GROUPS] [-w WRITE_FAMILIES] [-con CON_CORE] [-original_fasta ORIGINAL_FASTA] [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}] [-v]
+usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species,Genus} -clust_tool {CD-HIT} -output_dir OUTPUT_DIR [-input_type {separate,combined}] [-input_dir INPUT_DIR] [-name_split NAME_SPLIT]
+                     [-pid PIDENT] [-len_diff LEN_DIFF] [-mem CLUSTERING_MEMORY] [-t CLUSTERING_THREADS] [-cluster_file CLUSTER_FILE] [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG]
+                     [-core_groups CORE_GROUPS] [-genus_groups GENUS_GROUPS] [-w WRITE_FAMILIES] [-con CON_CORE] [-original_fasta ORIGINAL_FASTA] [-gpa GENE_PRESENCE_ABSENCE_OUT] [-verbose {True,False}] [-v]
 
-PyamilySeq v0.5.2: PyamilySeq Run Parameters.
+PyamilySeq v0.6.0: PyamilySeq Run Parameters.
 
 options:
   -h, --help            show this help message and exit
@@ -53,8 +54,8 @@ options:
 Required Arguments:
   -run_mode {Full,Partial}
                         Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?
-  -group_mode {Species}
-                        Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? - Genus mode not currently functioning
+  -group_mode {Species,Genus}
+                        Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode?
   -clust_tool {CD-HIT}  Clustering tool to use: CD-HIT, DIAMOND, BLAST or MMseqs2.
   -output_dir OUTPUT_DIR
                         Directory for all output files.
@@ -80,10 +81,13 @@ Partial-Mode Arguments - Required when "-run_mode Partial" is used:
 
 Grouping Arguments - Use to fine-tune grouping of genes after clustering:
   -reclustered RECLUSTERED
-                        Clustering output file from secondary round of clustering
+                        Currently only works on Partial Mode: Clustering output file from secondary round of clustering.
   -seq_tag SEQUENCE_TAG
                         Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences
-  -groups CORE_GROUPS   Default - ('99,95,15'): Gene family groups to use
+  -core_groups CORE_GROUPS
+                        Default - ('99,95,15'): Gene family groups to use for "Species" mode
+  -genus_groups GENUS_GROUPS
+                        Default - ('1,2,3,4,5,6'): Gene family groups to use for "Genus" mode
 
 Output Parameters:
   -w WRITE_FAMILIES     Default - No output: Output sequences of identified families (provide levels at which to output "-w 99,95" - Must provide FASTA file with -fasta
@@ -98,7 +102,6 @@ Misc:
                         Default - False: Print out runtime messages
   -v                    Default - False: Print out version number and exit
 
-
 ```
 
 
@@ -111,7 +114,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split _combined.gff3 -output
 ```bash
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name OUTPUT_FILE
 
-Seq-Combiner v0.5.2: Seq-Combiner Run Parameters.
+Seq-Combiner v0.6.0: Seq-Combiner Run Parameters.
 
 options:
   -h, --help            show this help message and exit

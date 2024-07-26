@@ -90,7 +90,8 @@ def main():
 
     ###Grouping Arguments
     grouping_args = parser.add_argument_group('Grouping Arguments - Use to fine-tune grouping of genes after clustering')
-    grouping_args.add_argument('-reclustered', action='store', dest='reclustered', help='Clustering output file from secondary round of clustering',
+    grouping_args.add_argument('-reclustered', action='store', dest='reclustered',
+                        help='Currently only works on Partial Mode: Clustering output file from secondary round of clustering.',
                         required=False)
     grouping_args.add_argument('-seq_tag', action='store', dest='sequence_tag', default='StORF',
                         help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
@@ -131,6 +132,8 @@ def main():
 
     ### Checking all required parameters are provided by user
     if options.run_mode == 'Full':
+        if options.reclustered != None:
+            sys.exit("Currently reclustering only works on Partial Mode.")
         required_full_mode = [options.input_type, options.input_dir, options.name_split, options.clust_tool,
                               options.pident, options.len_diff]
         if all(required_full_mode):
@@ -219,6 +222,7 @@ def main():
                 self.sequence_tag = options.sequence_tag
                 self.core_groups = groups_to_use
                 self.clusters = clustering_output + clust_affix
+                self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_families = options.write_families
                 self.con_core = options.con_core
@@ -235,6 +239,7 @@ def main():
                 self.sequence_tag = options.sequence_tag
                 self.core_groups = groups_to_use
                 self.clusters = options.cluster_file
+                self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_families = options.write_families
                 self.con_core = options.con_core
