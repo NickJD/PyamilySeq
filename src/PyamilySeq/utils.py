@@ -3,6 +3,8 @@ import shutil
 import os
 import glob
 import collections
+from tempfile import NamedTemporaryFile
+import sys
 
 
 def is_tool_installed(tool_name):
@@ -30,7 +32,76 @@ def fix_path(path):
     return fixed_path
 
 
+def wrap_sequence(sequence, width=60):
+    wrapped_sequence = []
+    for i in range(0, len(sequence), width):
+        wrapped_sequence.append(sequence[i:i + width])
+    return "\n".join(wrapped_sequence)
 
+
+def read_fasta(fasta_file):
+    sequences = {}
+    current_sequence = None
+    with open(fasta_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue  # Skip empty lines
+            if line.startswith('>'):
+                current_sequence = line[1:]  # Remove '>' character
+                sequences[current_sequence] = ''
+            else:
+                sequences[current_sequence] += line
+    return sequences
+
+
+def reorder_dict_by_keys(original_dict, sorted_keys):
+    return {k: original_dict[k] for k in sorted_keys}
+def custom_sort_key(k, dict1, dict2):
+    return (len(dict1[k]), len(dict2[k]))
+
+def sort_keys_by_values(dict1, dict2):
+    sorted_keys = sorted(dict1.keys(), key=lambda k: custom_sort_key(k, dict1, dict2), reverse=True)
+    return sorted_keys
+
+def select_longest_gene(sequences):
+    """Select the longest sequence for each genome."""
+    longest_sequences = {}
+    for seq_id, sequence in sequences.items():
+        genome = seq_id.split('|')[0]  # Assuming genome name can be derived from the sequence ID
+        if genome not in longest_sequences or len(sequence) > len(longest_sequences[genome][1]):
+            longest_sequences[genome] = (seq_id, sequence)
+    return longest_sequences
+
+
+def run_mafft_on_sequences(options, sequences, output_file):
+    print("Conducting MAFFT alignment.")
+    """Run mafft on the given sequences and write to output file."""
+    # Create a temporary input file for mafft
+    with NamedTemporaryFile('w', delete=False) as temp_input_file:
+        for header, sequence in sequences.items():
+            temp_input_file.write(f">{header}\n{sequence}\n")
+        temp_input_file_path = temp_input_file.name
+
+    # Run mafft
+    try:
+        with open(output_file, 'w') as output_f:
+            if options.verbose == True:
+                subprocess.run(
+                    ['mafft', '--auto', temp_input_file_path],
+                    stdout=output_f,
+                    stderr=sys.stderr,
+                    check=True
+                )
+            else:
+                subprocess.run(
+                    ['mafft', '--auto', temp_input_file_path],
+                    stdout=output_f,
+                    stderr=subprocess.DEVNULL,  # Suppress stderr
+                    check=True
+                )
+    finally:
+        os.remove(temp_input_file_path)  # Clean up the temporary file
 
 
 
@@ -45,6 +116,7 @@ def read_separate_files(input_dir, name_split, combined_out):
 
             gff_features = []
             with open(gff_file, 'r') as file:
+                seen_seq_ids = collections.defaultdict(int)
                 lines = file.readlines()
                 for line in lines:
                     line_data = line.split('\t')
@@ -54,6 +126,11 @@ def read_separate_files(input_dir, name_split, combined_out):
                             feature = line_data[2]
                             strand = line_data[6]
                             start, end = int(line_data[3]), int(line_data[4])
+                            if seq_id in seen_seq_ids:
+                                seq_id += '_' + str(seen_seq_ids[seq_id])
+                                seen_seq_ids[seq_id] + 1
+                            else:
+                                seen_seq_ids[seq_id] = 1
                             seq_id = line_data[8].split('ID=')[1].split(';')[0]
                             gff_features.append((contig, start, end, strand, feature,  seq_id))
             fasta_dict = collections.defaultdict(str)
@@ -93,6 +170,7 @@ def read_combined_files(input_dir, name_split, combined_out):
             fasta_dict = collections.defaultdict(str)
             gff_features = []
             with open(gff_file, 'r') as file:
+                seen_seq_ids = collections.defaultdict(int)
                 lines = file.readlines()
                 fasta_section = False
                 for line in lines:
@@ -114,6 +192,11 @@ def read_combined_files(input_dir, name_split, combined_out):
                                 strand = line_data[6]
                                 start, end = int(line_data[3]), int(line_data[4])
                                 seq_id = line_data[8].split('ID=')[1].split(';')[0]
+                                if seq_id in seen_seq_ids:
+                                    seq_id += '_' + str(seen_seq_ids[seq_id])
+                                    seen_seq_ids[seq_id] + 1
+                                else:
+                                    seen_seq_ids[seq_id] = 1
                                 gff_features.append((contig, start, end, strand, feature,  seq_id))
 
                 for contig, fasta in fasta_dict.items():

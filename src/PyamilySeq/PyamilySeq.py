@@ -7,11 +7,13 @@ import subprocess
 
 
 try:
-    from .PyamilySeq_Species import cluster
+    from .PyamilySeq_Species import cluster as species_cluster
+    from .PyamilySeq_Genus import cluster as genus_cluster
     from .Constants import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
-    from PyamilySeq_Species import cluster
+    from PyamilySeq_Species import cluster as species_cluster
+    from PyamilySeq_Genus import cluster as genus_cluster
     from Constants import *
     from utils import *
 
@@ -44,8 +46,8 @@ def main():
     required.add_argument('-run_mode', action='store', dest='run_mode', choices=['Full','Partial'],
                           help='Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?',
                           required=True)
-    required.add_argument('-group_mode', action='store', dest='group_type', choices=['Species'],
-                          help='Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? - Genus mode not currently functioning',
+    required.add_argument('-group_mode', action='store', dest='group_type', choices=['Species', 'Genus'],
+                          help='Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? ',
                           required=True)
     required.add_argument("-clust_tool", action="store", dest="clust_tool", choices=['CD-HIT'],
                           help="Clustering tool to use: CD-HIT, DIAMOND, BLAST or MMseqs2.",
@@ -93,8 +95,11 @@ def main():
     grouping_args.add_argument('-seq_tag', action='store', dest='sequence_tag', default='StORF',
                         help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
                         required=False)
-    grouping_args.add_argument('-groups', action="store", dest='core_groups', default="99,95,15",
-                        help='Default - (\'99,95,15\'): Gene family groups to use',
+    grouping_args.add_argument('-core_groups', action="store", dest='core_groups', default="99,95,15",
+                        help='Default - (\'99,95,15\'): Gene family groups to use for "Species" mode',
+                        required=False)
+    grouping_args.add_argument('-genus_groups', action="store", dest='genus_groups', default="1,2,3,4,5,6",
+                        help='Default - (\'1,2,3,4,5,6\'): Gene family groups to use for "Genus" mode',
                         required=False)
 
     ###Output Arguments
@@ -165,7 +170,7 @@ def main():
         else:
             exit("mafft is not installed. Please install mafft to proceed.")
     ##CD-HIT
-    if options.clust_tool == 'CD-HIT':
+    if options.clust_tool == 'CD-HIT' and options.run_mode == 'Full':
         if is_tool_installed('cd-hit'):
             if options.verbose == True:
                 print("cd-hit is installed. Proceeding with clustering.")
@@ -175,7 +180,7 @@ def main():
     if options.write_families != None and options.original_fasta == False:
         exit("-fasta must br provided if -w is used")
 
-    options.core_groups = options.core_groups + ',0'
+
 
 
     if options.cluster_file:
@@ -191,23 +196,28 @@ def main():
     combined_out_file = os.path.join(output_path, "combined_sequences.fasta")
     clustering_output = os.path.join(output_path, 'clustering_' + options.clust_tool)
 
+    if options.group_type == 'Species':
+        options.core_groups = options.core_groups + ',0'
+        groups_to_use = options.core_groups
+    else:
+        options.genus_groups = options.genus_groups + ',>'
+        groups_to_use = options.genus_groups
+
 
     if options.run_mode == 'Full':
-
-
-
         if options.input_type == 'separate':
             read_separate_files(options.input_dir, options.name_split, combined_out_file)
         else:
             read_combined_files(options.input_dir, options.name_split, combined_out_file)
 
         run_cd_hit(combined_out_file, clustering_output, options)
+
         class clustering_options:
             def __init__(self):
                 self.cluster_format = options.clust_tool
                 self.reclustered = options.reclustered
                 self.sequence_tag = options.sequence_tag
-                self.core_groups = '99,95,15,0'
+                self.core_groups = groups_to_use
                 self.clusters = clustering_output + clust_affix
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_families = options.write_families
@@ -223,7 +233,7 @@ def main():
                 self.cluster_format = options.clust_tool
                 self.reclustered = options.reclustered
                 self.sequence_tag = options.sequence_tag
-                self.core_groups = '99,95,15,0'
+                self.core_groups = groups_to_use
                 self.clusters = options.cluster_file
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_families = options.write_families
@@ -234,9 +244,10 @@ def main():
         clustering_options = clustering_options()
 
 
-
-
-    cluster(clustering_options)
+    if options.group_type == 'Species':
+        species_cluster(clustering_options)
+    elif options.group_type == 'Genus':
+        genus_cluster((clustering_options))
 
     print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
           "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")

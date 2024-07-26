@@ -163,3 +163,7 @@ cython_debug/
 
 test_data/CD-HIT/Gene_Families_Output/
 test_data/tmp/
+
+test_data/species/testing/Gene_Families_Output/
+
+test_data/testing/Gene_Families_Output/
