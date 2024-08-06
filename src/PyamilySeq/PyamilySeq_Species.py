@@ -1,10 +1,6 @@
 #from line_profiler_pycharm import profile
 
-import copy
 import math
-import sys
-
-
 
 try:
     from .Constants import *
@@ -128,7 +124,7 @@ def get_cores(options,genome_dict):
 #@profile
 def calc_First_only_core(cluster, First_num, groups, cores):
     groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= First_num <= fir):
+    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= int(First_num) <= fir):
         res = idx
     family_group = list(groups)[res]
     cores['First_core_'+family_group].append(cluster)
@@ -174,7 +170,7 @@ def cluster(options):
 
     if options.cluster_format == 'CD-HIT':
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '|')
-    elif options.cluster_format in ['TSV','CSV']:
+    elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '|')
 
     ###
@@ -183,10 +179,10 @@ def cluster(options):
 
     if options.reclustered != None:
         if options.cluster_format == 'CD-HIT':
-            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second = combined_clustering_CDHIT(options, genome_dict, '|')
-        if options.cluster_format == ['TSV','CSV']:
-            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second = combined_clustering_Edge_List(options, '|')
-
+            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genome_dict, '|')
+        elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
+            #Fix
+            combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,combined_pangenome_clusters_Second_sequences  = combined_clustering_Edge_List(options, '|')
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, '|')
     else:
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
@@ -201,19 +197,28 @@ def cluster(options):
     pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type, sorted_first_keys)
 
     print("Calculating Groups")
+    seen_groupings = []
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
     ############################### Calculate First only
-        calc_First_only_core(cluster, numbers[1],groups,cores)
+        cluster = str(cluster)
+        for grouping in numbers[2]: #!!# Could do with a more elegant solution
+            current_cluster = grouping[0].split(':')[0]
+            if current_cluster not in seen_groupings:
+                seen_groupings.append(current_cluster)
+                current_cluster_size = grouping[0].split(':')[1]
+                calc_First_only_core(current_cluster, current_cluster_size,groups,cores)
+            ############################# Calculate First and Reclustered-Second
+                if numbers[0] == 1 and numbers[3] >= 1:  # If Seconds did not combine First reps
+                    calc_single_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
+                elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Seconds combined multiple Firsts
+                    calc_multi_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
+                elif numbers[4] >= 1:
+                    Number_Of_Second_Extending_But_Same_Genomes += 1
+            else:
+                if options.verbose == True:
+                    print("First cluster " + current_cluster + " already processed - This is likely because it was clustered with another First representative.")
 
     if options.reclustered != None:
-        ############################# Calculate First and Reclustered-Second
-        if numbers[0] == 1 and numbers[3] >= 1:  # If Seconds did not combine First reps
-            calc_single_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
-        elif numbers[0] > 1 and numbers[3] >= 1:  # If unique Secondss combined multiple Firsts
-            calc_multi_First_extended_Second_only_core(cluster, numbers[1], groups, cores, numbers[3])
-        elif numbers[4] >= 1:
-            Number_Of_Second_Extending_But_Same_Genomes += 1
-
         combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
         combined_pangenome_clusters_Second_Type = defaultdict(list)
         for cluster, genomes in combined_pangenome_clusters_Second.items():
@@ -240,13 +245,22 @@ def cluster(options):
                 if key.startswith(key_prefix):
                     print(f"{key}: {len(value)}")
                     outfile.write(f"{key}: {len(value)}\n")
-        print("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
-        outfile.write("Total Number of Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
-
+        print("Total Number of First Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
+        outfile.write("Total Number of First Gene Groups (Including Singletons): " + str(len(pangenome_clusters_First_sequences_sorted)))
+        if options.reclustered!= None:
+            print("Total Number of Second Gene Groups (Including Singletons): " + str(
+                len(combined_pangenome_clusters_Second_sequences)))
+            print("Total Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: " + str(
+                Number_Of_Second_Extending_But_Same_Genomes))
+            outfile.write("\nTotal Number of Second Gene Groups (Including Singletons): " + str(
+                len(combined_pangenome_clusters_Second_sequences)))
+            outfile.write("\nTotal Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: " + str(
+                Number_Of_Second_Extending_But_Same_Genomes))
+        #Report number of first and second clusters and do the ame for genus
     if options.gene_presence_absence_out != None:
         gene_presence_absence_output(options,genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
-    if options.write_families != None and options.fasta != None:
+    if options.write_groups != None and options.fasta != None:
         sequences = read_fasta(options.fasta)
         output_dir = os.path.dirname(os.path.abspath(options.output_dir))
         output_dir = os.path.join(output_dir, 'Gene_Families_Output')
@@ -256,7 +270,7 @@ def cluster(options):
             os.makedirs(output_dir)
         for key_prefix in key_order:
             for key, values in cores.items():
-                if any(part in options.write_families.split(',') for part in key.split('_')):
+                if any(part in options.write_groups.split(',') for part in key.split('_')):
                     if key.startswith(key_prefix):
                         for value in values:
                             output_filename = f"{key}_{value}.fasta"
@@ -269,7 +283,7 @@ def cluster(options):
                                         wrapped_sequence = wrap_sequence(sequences[header])
                                         outfile.write(f"{wrapped_sequence}\n")
 
-    if options.con_core != None and options.fasta != None and options.write_families != None:
+    if options.align_core != None and options.fasta != None and options.write_groups != None:
         process_gene_families(options, os.path.join(output_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
 
 

@@ -1,0 +1,254 @@
+Archaea
++-Thermoproteota
+| \-Thermoprotei
+|   ++Sulfolobales
+|   | \-Sulfolobus
+|   \+Thermoproteales
+|     \-Pyrobaculum
+\-Euryarchaeota
+  ++Thermococci
+  | \-Thermococcus
+  ++Methanomicrobia
+  | \-Methanosarcina
+  \+Methanobacteria
+    \-Methanobacterium
+-----------------------------------
+Bacteria
+++Spirochaetota
+| \-Brachyspira
++-Mycoplasmatota
+| +-Mycoplasmoidales
+| | \-Metamycoplasmataceae
+| |   +-Metamycoplasma
+| |   \-Mycoplasmopsis
+| \-Mollicutes
+|   +-Entomoplasmatales
+|   | +-Entomoplasmataceae
+|   | | \-Mesoplasma
+|   | \-Spiroplasmataceae
+|   |   \-Spiroplasma
+|   \+Mycoplasmatales
+|     \-Mycoplasma
++-Actinomycetota
+| \-Actinomycetes
+|   ++Kitasatosporales
+|   | \-Streptomyces
+|   ++Micromonosporales
+|   | \-Micromonospora
+|   ++Pseudonocardiales
+|   | \-Amycolatopsis
+|   +-Propionibacteriales
+|   | +-Nocardioidaceae
+|   | | +-Aeromicrobium
+|   | | \-Nocardioides
+|   | \-Propionibacteriaceae
+|   |   +-Cutibacterium
+|   |   \-Propionibacterium
+|   +-Mycobacteriales
+|   | +-Gordoniaceae
+|   | | \-Gordonia
+|   | +-Nocardiaceae
+|   | | \-Rhodococcus
+|   | +-Mycobacteriaceae
+|   | | +-Mycolicibacterium
+|   | | +-Mycobacteroides
+|   | | \-Mycobacterium
+|   | \-Corynebacteriaceae
+|   |   \-Corynebacterium
+|   ++Bifidobacteriales
+|   | \-Bifidobacterium
+|   +-Micrococcales
+|   | +-Microbacteriaceae
+|   | | \-Microbacterium
+|   | +-Brevibacteriaceae
+|   | | \-Brevibacterium
+|   | \-Micrococcaceae
+|   |   \-Arthrobacter
+|   \+Actinomycetales
+|     \-Actinomyces
+++Cyanobacteriota
+| \-Synechococcales
+|   +-Prochlorococcaceae
+|   | \-Prochlorococcus
+|   \-Synechococcaceae
+|     \-Synechococcus
++-Bacillota
+| ++Caldicellulosiruptorales
+| | \-Caldicellulosiruptor
+| ++Clostridia
+| | \-Clostridium
+| +-Bacilli
+| | +-Lactobacillales
+| | | +-Lactobacillaceae
+| | | | +-Ligilactobacillus
+| | | | +-Companilactobacillus
+| | | | +-Limosilactobacillus
+| | | | \-Lactobacillus
+| | | +-Enterococcaceae
+| | | | \-Enterococcus
+| | | \-Streptococcaceae
+| | |   +-Lactococcus
+| | |   \-Streptococcus
+| | \-Bacillales
+| |   +-Paenibacillaceae
+| |   | +-Brevibacillus
+| |   | \-Paenibacillus
+| |   +-Listeriaceae
+| |   | \-Listeria
+| |   +-Bacillaceae
+| |   | +-Lysinibacillus
+| |   | +-Geobacillus
+| |   | \-Bacillus
+| |   +-Planococcaceae
+| |   | \-Planococcus
+| |   \-Staphylococcaceae
+| |     \-Staphylococcus
+| \+Negativicutes
+|   \-Selenomonas
+++Thermodesulfobacteriota
+| \-Desulfovibrio
+++Fusobacteriota
+| \-Fusobacterium
+++Chlamydiota
+| \-Chlamydia
++-Deinococcota
+| \-Deinococci
+|   +-Deinococcales
+|   | \-Deinococcaceae
+|   |   \-Deinococcus
+|   \+Thermales
+|     \-Thermus
++-Bacteroidota
+| ++Cytophagia
+| | \-Hymenobacter
+| ++Sphingobacteriia
+| | \-Sphingobacteriaceae
+| |   +-Mucilaginibacter
+| |   \-Pedobacter
+| +-Bacteroidia
+| | \-Bacteroidales
+| |   +-Prevotellaceae
+| |   | \-Prevotella
+| |   \-Bacteroidaceae
+| |     \-Bacteroides
+| \-Flavobacteriia
+|   \-Flavobacteriales
+|     +-Weeksellaceae
+|     | \-Chryseobacterium
+|     \-Flavobacteriaceae
+|       +-Tenacibaculum
+|       +-Polaribacter
+|       +-Capnocytophaga
+|       \-Flavobacterium
+++Campylobacterota
+| \-Campylobacterales
+|   +-Helicobacteraceae
+|   | \-Helicobacter
+|   \-Campylobacteraceae
+|     \-Campylobacter
+\-Pseudomonadota
+  +-Betaproteobacteria
+  | ++Nitrosomonadales
+  | | \-Nitrosomonas
+  | ++Neisseriales
+  | | \-Neisseria
+  | \-Burkholderiales
+  |   +-Burkholderiaceae
+  |   | +-Paraburkholderia
+  |   | +-Cupriavidus
+  |   | +-Pandoraea
+  |   | +-Ralstonia
+  |   | \-Burkholderia
+  |   +-Comamonadaceae
+  |   | \-Acidovorax
+  |   +-Oxalobacteraceae
+  |   | +-Collimonas
+  |   | +-Janthinobacterium
+  |   | \-Herbaspirillum
+  |   \-Alcaligenaceae
+  |     +-Bordetella
+  |     \-Achromobacter
+  +-Alphaproteobacteria
+  | +-Sphingomonadales
+  | | +-Sphingomonadaceae
+  | | | +-Sphingopyxis
+  | | | +-Sphingobium
+  | | | \-Sphingomonas
+  | | \-Erythrobacteraceae
+  | |   \-Erythrobacter
+  | +-Rickettsiales
+  | | +-Anaplasmataceae
+  | | | \-Ehrlichia
+  | | \-Rickettsiaceae
+  | |   \-Rickettsia
+  | ++Rhodospirillales
+  | | \-Acetobacter
+  | +-Hyphomicrobiales
+  | | +-Phyllobacteriaceae
+  | | | \-Mesorhizobium
+  | | +-Bartonellaceae
+  | | | \-Bartonella
+  | | +-Methylobacteriaceae
+  | | | \-Methylobacterium
+  | | +-Nitrobacteraceae
+  | | | \-Bradyrhizobium
+  | | +-Rhizobiaceae
+  | | | +-Sinorhizobium
+  | | | +-Rhizobium
+  | | | \-Agrobacterium
+  | | \-Brucellaceae
+  | |   \-Brucella
+  | \-Caulobacterales
+  |   \-Caulobacteraceae
+  |     +-Brevundimonas
+  |     \-Caulobacter
+  \-Gammaproteobacteria
+    ++Oceanospirillales
+    | \-Halomonas
+    +-Pasteurellales
+    | \-Pasteurellaceae
+    |   +-Pasteurella
+    |   +-Haemophilus
+    |   \-Actinobacillus
+    ++Vibrionales
+    | \-Vibrio
+    ++Aeromonadales
+    | \-Aeromonas
+    +-Enterobacterales
+    | +-Erwiniaceae
+    | | \-Pantoea
+    | +-Yersiniaceae
+    | | +-Yersinia
+    | | \-Serratia
+    | \-Enterobacteriaceae
+    |   +-Salmonella
+    |   +-Klebsiella
+    |   +-Escherichia
+    |   +-Enterobacter
+    |   \-Citrobacter
+    +-Moraxellales
+    | \-Moraxellaceae
+    |   +-Moraxella
+    |   \-Acinetobacter
+    ++Legionellales
+    | \-Legionella
+    +-Pseudomonadales
+    | +-Marinobacteraceae
+    | | \-Marinobacter
+    | \-Pseudomonadaceae
+    |   \-Pseudomonas
+    ++Thiotrichales
+    | \-Francisella
+    +-Lysobacterales
+    | \-Lysobacteraceae
+    |   +-Stenotrophomonas
+    |   +-Xanthomonas
+    |   \-Lysobacter
+    \-Alteromonadales
+      +-Pseudoalteromonadaceae
+      | \-Pseudoalteromonas
+      +-Alteromonadaceae
+      | \-Alteromonas
+      \-Shewanellaceae
+        \-Shewanella
+-----------------------------------

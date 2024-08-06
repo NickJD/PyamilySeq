@@ -1,10 +1,10 @@
 Genus Groups:
-First_genera_1:	28549
+First_genera_1:	29672
 extended_genera_1:	0
 combined_genera_1:	0
-Second_genera_1:	249
-only_Second_genera_1:	17551
-First_genera_2:	12
+Second_genera_1:	163
+only_Second_genera_1:	18439
+First_genera_2:	6
 extended_genera_2:	0
 combined_genera_2:	0
 Second_genera_2:	0
@@ -34,4 +34,6 @@ extended_genera_>:	0
 combined_genera_>:	0
 Second_genera_>:	0
 only_Second_genera_>:	0
-Total Number of Gene Groups (Including Singletons): 28561
+Total Number of Gene Groups (Including Singletons): 29678
+Total Number of Second Gene Groups (Including Singletons): 45697
+Total Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: 163

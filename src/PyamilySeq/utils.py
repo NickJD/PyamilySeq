@@ -106,7 +106,7 @@ def run_mafft_on_sequences(options, sequences, output_file):
 
 
 
-def read_separate_files(input_dir, name_split, combined_out):
+def read_separate_files(input_dir, name_split, gene_ident, combined_out):
     with open(combined_out, 'w') as combined_out_file:
         for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
             genome_name = os.path.basename(gff_file).split(name_split)[0]
@@ -121,7 +121,7 @@ def read_separate_files(input_dir, name_split, combined_out):
                 for line in lines:
                     line_data = line.split('\t')
                     if len(line_data) == 9:
-                        if line_data[2] == 'CDS':
+                        if any(gene_type in line_data[2] for gene_type in gene_ident):
                             contig = line_data[0]
                             feature = line_data[2]
                             strand = line_data[6]
@@ -163,7 +163,7 @@ def read_separate_files(input_dir, name_split, combined_out):
                         combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
 
-def read_combined_files(input_dir, name_split, combined_out):
+def read_combined_files(input_dir, name_split, gene_ident, combined_out):
     with open(combined_out, 'w') as combined_out_file:
         for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
             genome_name = os.path.basename(gff_file).split(name_split)[0]
@@ -186,7 +186,7 @@ def read_combined_files(input_dir, name_split, combined_out):
                     else:
                         line_data = line.split('\t')
                         if len(line_data) == 9:
-                            if line_data[2] == 'CDS':
+                            if any(gene_type in line_data[2] for gene_type in gene_ident):
                                 contig = line_data[0]
                                 feature = line_data[2]
                                 strand = line_data[6]
@@ -217,3 +217,21 @@ def read_combined_files(input_dir, name_split, combined_out):
 
                             wrapped_sequence = '\n'.join([cds_sequence[i:i + 60] for i in range(0, len(cds_sequence), 60)])
                             combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+
+
+def read_fasta_files(input_dir, name_split, combined_out):
+    with open(combined_out, 'w') as combined_out_file:
+        for fasta_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
+            genome_name = os.path.basename(fasta_file).split(name_split)[0]
+            fasta_dict = collections.defaultdict(str)
+            with open(fasta_file, 'r') as file:
+                lines = file.readlines()
+                for line in lines:
+                    if line.startswith('>'):
+                        current_seq = line[1:].split()[0]
+                        fasta_dict[current_seq] = ''
+                    else:
+                        fasta_dict[current_seq] +=line.strip()
+                for id, seq in fasta_dict.items():
+                    wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
+                    combined_out_file.write(f">{genome_name}|{id}\n{wrapped_sequence}\n")

@@ -1,11 +1,9 @@
-import subprocess
-import shutil
-import os
-import glob
+
 import sys
 import copy
 from collections import OrderedDict
 from collections import defaultdict
+from collections import Counter
 
 def cluster_CDHIT(options, splitter):
     First_in = open(options.clusters, 'r')
@@ -17,8 +15,6 @@ def cluster_CDHIT(options, splitter):
     reps = OrderedDict()
     ## Load in all data for easier reuse later
     for line in First_in:
-        if '>Cluster 7575' in line:
-            print()
         if line.startswith('>'):
             if first == False:
                 cluster_size = len(clusters[cluster_id])
@@ -46,6 +42,7 @@ def cluster_CDHIT(options, splitter):
                 if clustered_taxa not in pangenome_clusters_First[cluster_id]:
                     pangenome_clusters_First[cluster_id].append(clustered_taxa)
                 pangenome_clusters_First_sequences[cluster_id].append(clustered)
+
     return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps
 
 
@@ -61,8 +58,8 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
         Seconds = 0
         seen_Seconds = []
         added_Second_genomes = 0
-        try:  # get the cluster from the storf clusters which contains this rep
-            clustered_combined = combined_pangenome_clusters_First_Second_clustered[rep]  # Not true clusters - I put a PEP as key myself
+        try:  # get the cluster from the Second clusters which contains this rep
+            clustered_combined = combined_pangenome_clusters_First_Second_clustered[rep]
             seen_clust_Genomes = []
             num_clustered_First[cluster].append(rep + '_' + str(len(pep_genomes)))
             for clust in clustered_combined:
@@ -86,17 +83,30 @@ def combined_clustering_counting(options, pangenome_clusters_First, reps, combin
                     sys.exit("Error: looking for sequence_tag")
 
             size_of_pep_clusters = []
-            peps = num_clustered_First[cluster]
-            for pep in peps:
-                pep = pep.rsplit('_', 1)
-                size_of_pep_clusters.append(int(pep[1]))
-            pangenome_clusters_Type[cluster] = [len(num_clustered_First[cluster]), sum(size_of_pep_clusters),
+            genomes = num_clustered_First[cluster]
+
+            if len(genomes) > 1: #!!# So that we don't double count - This still needs to account for whether the same genome/genus is present however. Probably need to unique ti
+               collecting_genomes = []
+               for genome in genomes:
+                   genome = genome.rsplit('_', 1)
+                   collecting_genomes.append(pangenome_clusters_First[str(list_of_reps.index(genome[0]))])
+                   size_of_pep_clusters.append([str(list_of_reps.index(genome[0])) + ':' + genome[1]])
+               flattened_list = [item for sublist in collecting_genomes for item in sublist]
+               element_counts = Counter(flattened_list)
+               unique_elements = [element for element, count in element_counts.items() if count == 1]
+               sum_size_of_pep_clusters = len(unique_elements)
+            else:
+                genome = genomes[0].rsplit('_', 1)
+                size_of_pep_clusters.append([str(list_of_reps.index(genome[0]))+':'+genome[1]])
+                sum_size_of_pep_clusters = int(genome[1])
+
+            pangenome_clusters_Type[cluster] = [len(num_clustered_First[cluster]), sum_size_of_pep_clusters,
                                                 size_of_pep_clusters, added_Second_genomes, Seconds, len(seen_Seconds)]
 
         except KeyError:
             ###Singleton
-            num_pep_genomes = [len(pep_genomes)]
-            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_pep_genomes, added_Second_genomes, Seconds,
+            num_First_genomes = [[str(cluster)+':'+str(len(pep_genomes))]]
+            pangenome_clusters_Type[cluster] = [1, len(pep_genomes), num_First_genomes, added_Second_genomes, Seconds,
                                                 len(seen_Seconds)]
     # pangenome_clusters_Type = [Number of First clustered genomes or genera, Size of the cluster, Ditto, Added Seconds,Number of Seconds,Unique Seconds ]
     return pangenome_clusters_Type
@@ -112,20 +122,21 @@ def single_clustering_counting(pangenome_clusters_First, reps):
         rep = list_of_reps[int(cluster)]  # get the rep of the current pep cluster
 
         try:  # get the cluster from the storf clusters which contains this rep
-            num_clustered_First[cluster].append(rep + '_' + str(len(First_taxa)))
+            num_clustered_First[str(cluster)].append(rep + '_' + str(len(First_taxa)))
             size_of_First_clusters = []
-            Firsts = num_clustered_First[cluster]
+            Firsts = num_clustered_First[str(cluster)]
             for First in Firsts:
                 First = First.rsplit('_', 1)
                 size_of_First_clusters.append(int(First[1]))
                 recorded_First.append(First[0])
+            num_First_genomes = [[str(cluster) + ':' + str(len(First_taxa))]]
             pangenome_clusters_Type[cluster] = [len(num_clustered_First[cluster]), sum(size_of_First_clusters),
-                                                size_of_First_clusters, 0, 0, 0]
+                                                num_First_genomes, 0, 0, 0]
 
         except KeyError:
             ###Singleton
-            num_First_taxa = [len(First_taxa)]
-            pangenome_clusters_Type[cluster] = [1, len(First_taxa), num_First_taxa, 0, 0, 0]
+            num_First_genomes = [[str(cluster)+':'+str(len(First_taxa))]]
+            pangenome_clusters_Type[cluster] = [1, len(First_taxa), num_First_genomes, 0, 0, 0]
 
     # pangenome_clusters_Type = [Number of First clustered genomes or genera, Size of the cluster, Ditto, 0,0,0 ]
     return pangenome_clusters_Type
@@ -158,7 +169,7 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
                         else:
                             already_seen_PEP.append(pep)
                 if len(combined_pangenome_clusters_Second_sequences[cluster_id]) > 0 and len(combined_pangenome_clusters_First_sequences[cluster_id]) > 0:
-                    if len(combined_pangenome_clusters_First_sequences[cluster_id]) > 1:  # If we have clustered >1 PEP family, we need to record 1 as key and all others are val
+                    if len(combined_pangenome_clusters_First_sequences[cluster_id]) > 1:  # If we have clustered >1 First family, we need to record 1 as key and all others are val
                         all_but_first = combined_pangenome_clusters_First_sequences[cluster_id][1:]
                         storfs_clustered = combined_pangenome_clusters_Second_sequences[cluster_id]
                         VALUE = all_but_first + storfs_clustered
@@ -194,13 +205,13 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
                     combined_pangenome_clusters_Second_sequences[cluster_id].append(clustered)
                 else:
                     if cluster_id not in not_Second_only_cluster_ids:
-                        not_Second_only_cluster_ids.append(cluster_id)  # Tell us which StORF_Reporter clustered are unmatched to a PEP
+                        not_Second_only_cluster_ids.append(cluster_id)
                     if clustered_taxa not in combined_pangenome_clusters_First[cluster_id]:
                         combined_pangenome_clusters_First[cluster_id].append(clustered_taxa)
                     combined_pangenome_clusters_First_sequences[cluster_id].append(clustered)
 
 
-    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second
+    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences
 
 
 def cluster_EdgeList(options,splitter):
@@ -321,4 +332,4 @@ def combined_clustering_Edge_List(options, splitter):
 
         last_rep = rep
 
-    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second
+    return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences
