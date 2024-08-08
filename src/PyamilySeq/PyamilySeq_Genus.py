@@ -11,43 +11,7 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from utils import *
 
 
-def process_gene_families(options, directory, output_file):
-    """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
-    concatenated_sequences = {}
-    output_file = directory.replace('Gene_Families_Output',output_file)
 
-    # Iterate over each gene family file
-    for gene_file in os.listdir(directory):
-        if gene_file.endswith('.fasta'):
-            gene_path = os.path.join(directory, gene_file)
-
-            # Read sequences from the gene family file
-            sequences = read_fasta(gene_path)
-
-            # Select the longest sequence for each genome
-            longest_sequences = select_longest_gene(sequences)
-
-            # Run mafft on the longest sequences
-            aligned_file = f"{gene_file}_aligned.fasta"
-            run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
-
-            # Read aligned sequences and concatenate them
-            aligned_sequences = read_fasta(aligned_file)
-            for genome, aligned_seq in aligned_sequences.items():
-                genome_name = genome.split('|')[0]
-                if genome_name not in concatenated_sequences:
-                    concatenated_sequences[genome_name] = ""
-                concatenated_sequences[genome_name] += aligned_seq
-
-            # Clean up aligned file
-            os.remove(aligned_file)
-
-    # Write the concatenated sequences to the output file
-    with open(output_file, 'w') as out:
-        for genome, sequence in concatenated_sequences.items():
-            out.write(f">{genome}\n")
-            wrapped_sequence = wrap_sequence(sequence, 60)
-            out.write(f"{wrapped_sequence}\n")
 
 def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
@@ -238,30 +202,40 @@ def cluster(options):
     if options.gene_presence_absence_out != None:
         gene_presence_absence_output(options,genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
-    if options.write_groups != None and options.fasta != None:
-        sequences = read_fasta(options.fasta)
-        output_dir = os.path.join(output_path, 'Gene_Families_Output')
+    if options.run_mode == 'Full':
+        if options.reclustered == None:
+            combined_pangenome_clusters_Second_sequences = None
+        if options.write_groups != None:
+            print("Outputting gene group FASTA files")
+            sequences = read_fasta(options.fasta)
+            #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
+            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
+            write_groups(options,output_dir, key_order, cores, sequences,
+                         pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
-        # Create output directory if it doesn't exist
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-        for key_prefix in key_order:
-            for key, values in cores.items():
-                if any(part in options.write_groups.split(',') for part in key.split('_')):
-                    if key.startswith(key_prefix):
-                        for value in values:
-                            output_filename = f"{key}_{value}.fasta"
-                            sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
-                            # Write sequences to output file that are in the sequences dictionary
-                            with open(os.path.join(output_dir, output_filename), 'w') as outfile:
-                                for header in sequences_to_write:
-                                    if header in sequences:
-                                        outfile.write(f">{header}\n")
-                                        wrapped_sequence = wrap_sequence(sequences[header])
-                                        outfile.write(f"{wrapped_sequence}\n")
+    elif options.run_mode == 'Partial':
+        if options.reclustered == None:
+            combined_pangenome_clusters_Second_sequences = None
+        if options.write_groups != None and options.fasta != None:
+            print("Outputting gene group FASTA files")
+            sequences = read_fasta(options.fasta)
+            #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
+            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
+            write_groups(options,output_dir, key_order, cores, sequences,
+                         pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
-    if options.align_core != None and options.fasta != None and options.write_groups != None:
-        process_gene_families(options, os.path.join(output_dir, 'Gene_Families_Output'), 'concatonated_genes_aligned.fasta')
+
+    # if options.write_groups != None and options.fasta != None:
+    #     sequences = read_fasta(options.fasta)
+    #     output_dir = os.path.join(output_path, 'Gene_Families_Output')
+    #
+    #     write_groups(options,output_dir, key_order, cores, sequences,
+    #                  pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
+
+
+    #!!# - Currently only align in Species Mode
+    #if options.align_core != None and options.fasta != None and options.write_groups != None:
+    #    process_gene_families(options, os.path.join(output_path, 'Gene_Families_Output'), 'concatenated_genes_aligned.fasta')
 
 
 
