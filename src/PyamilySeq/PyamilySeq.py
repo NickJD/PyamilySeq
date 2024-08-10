@@ -40,7 +40,7 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': A tool that groups genes into unqiue clusters.')
+    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': A tool that groups genes into unique clusters.')
     ### Required Arguments
     required = parser.add_argument_group('Required Arguments')
     required.add_argument('-run_mode', action='store', dest='run_mode', choices=['Full','Partial'],

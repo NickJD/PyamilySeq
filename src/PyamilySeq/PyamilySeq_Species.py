@@ -96,6 +96,7 @@ def calc_single_First_extended_Second_only_core(cluster, First_num, groups, core
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= First_num+Second_num <= fir):
         res = idx
+
     family_group = list(groups)[res]
     cores['extended_core_' + family_group].append(cluster)
 
@@ -103,8 +104,11 @@ def calc_single_First_extended_Second_only_core(cluster, First_num, groups, core
 #@profile
 def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
     groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= First_num+Second_num <= fir):
-        res = idx
+    # Looping through the list to find the matching condition
+    for idx, (sec, fir) in enumerate(groups_as_list):
+        if sec <= First_num + Second_num <= fir:
+            res = idx
+            break
     family_group = list(groups)[res]
     cores['combined_core_' + family_group].append(cluster)
 
@@ -131,9 +135,9 @@ def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count
 def cluster(options):
 
     if options.cluster_format == 'CD-HIT':
-        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '|')
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '|')
     elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
-        genome_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '|')
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '|')
 
     ###
     cores, groups = get_cores(options, genome_dict)
@@ -145,7 +149,7 @@ def cluster(options):
         elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
             #Fix
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second,combined_pangenome_clusters_Second_sequences  = combined_clustering_Edge_List(options, '|')
-        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, '|')
+        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, '|')
     else:
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
 
@@ -163,6 +167,8 @@ def cluster(options):
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
     ############################### Calculate First only
         cluster = str(cluster)
+        if '78' in cluster:
+            pass
         for grouping in numbers[2]: #!!# Could do with a more elegant solution
             current_cluster = grouping[0].split(':')[0]
             if current_cluster not in seen_groupings:

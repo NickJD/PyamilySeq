@@ -11,8 +11,6 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from utils import *
 
 
-
-
 def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
     output_dir = os.path.abspath(options.output_dir)
@@ -114,9 +112,9 @@ def calc_only_Second_only_core(cluster, cores, Second_num): # only count the tru
 def cluster(options):
 
     if options.cluster_format == 'CD-HIT':
-        genus_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '_')
+        genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '_')
     elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
-        genus_dict, pangenome_clusters_First, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '_')
+        genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '_')
 
     ###
     cores, groups = get_cores(options)
@@ -127,7 +125,7 @@ def cluster(options):
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genus_dict, '_')
         elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_Edge_List(options, '_')
-        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, '_')
+        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, '_')
     else:
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
 
@@ -178,9 +176,11 @@ def cluster(options):
                 calc_only_Second_only_core(cluster,  cores, data[1])
     ###########################
     ### Output
-    key_order = list(cores.keys())
     output_path = os.path.abspath(options.output_dir)
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
     stats_out = os.path.join(output_path,'summary_statistics.txt')
+    key_order = list(cores.keys())
     with open(stats_out,'w') as outfile:
         print("Genus Groups:")
         outfile.write("Genus Groups:\n")

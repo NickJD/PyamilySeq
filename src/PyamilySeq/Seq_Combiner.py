@@ -33,7 +33,7 @@ def main():
                           required=True)
     optional = parser.add_argument_group('Optional Arguments')
     optional.add_argument('-gene_ident', action='store', dest='gene_ident', default='CDS',
-                          help='Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo"'
+                          help='Default - "CDS": Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo"'
                                ' - Not compatible with "fasta" input mode.',
                           required=False)
     optional.add_argument('-translate', action='store_true', dest='translate', default=None,

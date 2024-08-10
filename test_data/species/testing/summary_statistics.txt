@@ -1,6 +1,6 @@
 Gene Groups:
-First_core_99: 3099
+First_core_99: 2998
 First_core_95: 0
-First_core_15: 3200
-First_core_0: 4996
-Total Number of First Gene Groups (Including Singletons): 11295
+First_core_15: 3268
+First_core_0: 5237
+Total Number of First Gene Groups (Including Singletons): 11503

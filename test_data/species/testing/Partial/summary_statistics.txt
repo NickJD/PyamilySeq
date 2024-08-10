@@ -1,0 +1,24 @@
+Gene Groups:
+First_core_99: 3153
+First_core_95: 0
+First_core_15: 3140
+First_core_0: 4279
+extended_core_99: 0
+extended_core_95: 0
+extended_core_15: 84
+extended_core_0: 0
+combined_core_99: 0
+combined_core_95: 0
+combined_core_15: 0
+combined_core_0: 0
+Second_core_99: 0
+Second_core_95: 0
+Second_core_15: 22
+Second_core_0: 87
+only_Second_core_99: 0
+only_Second_core_95: 0
+only_Second_core_15: 2045
+only_Second_core_0: 3314
+Total Number of First Gene Groups (Including Singletons): 10572
+Total Number of Second Gene Groups (Including Singletons): 15931
+Total Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: 25
