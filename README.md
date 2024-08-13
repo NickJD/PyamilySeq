@@ -83,37 +83,36 @@ Please report any issues to: https://github.com/NickJD/PyamilySeq/issues
 ### Reclustering can be used to see where additional sequences/genes lay in relation to a contemporary pangenome/gene grouping.
 ```
 PyamilySeq -run_mode Partial -group_mode Species -clustering_format CD-HIT -output_dir .../test_data/species/CD-HIT/testing 
--cluster_file .../test_data/species/CD-HIT/E-coli_extracted_cds_cd-hit_90_60.clstr -gpa 
--reclustered .../test_data/species/CD-HIT/E-coli_extracted_cds_cd-hit_90_60_And_StORFs_cds_90_60.clstr
+-cluster_file .../test_data/species/CD-HIT/E-coli_extracted_cds_cd-hit_80_60.clstr -gpa 
+-reclustered .../test_data/species/CD-HIT/E-coli_extracted_cds_cd-hit_80_60_And_StORFs_cds_80_60.clstr
 ```
 #### As can be seen below, the additional sequences recovered by the StORF-Reporter annotation tool have 'extended' contemporary or created entirely new gene groups. 'First' corresponds to the groups identified from the first clustering round and 'Second' for the second. In 'reclustering' mode, First_core_# groups are unaffected thus retaining the initial grouping information. 
 ```commandline
-Running PyamilySeq v0.7.0
 Calculating Groups
 Gene Groups:
-First_core_99: 69
-First_core_95: 1002
-First_core_15: 4716
-First_core_0: 37960
-extended_core_99: 6
-extended_core_95: 73
-extended_core_15: 331
-extended_core_0: 582
-combined_core_99: 4
-combined_core_95: 88
-combined_core_15: 455
-combined_core_0: 228
+First_core_99: 587
+First_core_95: 1529
+First_core_15: 3708
+First_core_0: 29992
+extended_core_99: 29
+extended_core_95: 67
+extended_core_15: 431
+extended_core_0: 1331
+combined_core_99: 2
+combined_core_95: 4
+combined_core_15: 5
+combined_core_0: 4
 Second_core_99: 0
-Second_core_95: 5
-Second_core_15: 254
-Second_core_0: 3714
-only_Second_core_99: 6
-only_Second_core_95: 364
-only_Second_core_15: 3950
-only_Second_core_0: 31269
-Total Number of First Gene Groups (Including Singletons): 43747
-Total Number of Second Gene Groups (Including Singletons): 66525
-Total Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: 9593
+Second_core_95: 6
+Second_core_15: 172
+Second_core_0: 1825
+only_Second_core_99: 53
+only_Second_core_95: 493
+only_Second_core_15: 3806
+only_Second_core_0: 27569
+Total Number of First Gene Groups (Including Singletons): 35816
+Total Number of Second Gene Groups (Including Singletons): 67728
+Total Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: 136
 Outputting gene_presence_absence file
 Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq
 Please report any issues to: https://github.com/NickJD/PyamilySeq/issues
@@ -183,9 +182,9 @@ Output Parameters:
   -w WRITE_GROUPS       Default - No output: Output sequences of identified groups (provide levels at which to output - Species "-w 99,95" Genus "-w 2,3" -
                         Must provide FASTA file with -original_fasta if in Partial run mode.
   -a                    Default - No output: SLOW! (Only works for Species mode) Output aligned and concatinated sequences of identified groups -provide
-                        group levels at which to output "-w 99,95" - Must provide FASTA file with -original_fasta in Partialrun mode.
+                        group levels at which to output "-w 99,95" - Must provide FASTA file with -original_fasta in Partial run mode.
   -original_fasta ORIGINAL_FASTA
-                        FASTA file to use in conjunction with "-w" or "-con" when running in Partial Mode.
+                        FASTA file to use in conjunction with "-w" or "-a" when running in Partial Mode.
   -gpa                  Default - False: If selected, a Roary/Panaroo formatted gene_presence_absence.csv will be created - Required for Coinfinder and
                         other downstream tools
 
