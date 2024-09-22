@@ -199,7 +199,7 @@ def cluster(options):
             outfile.write("\nTotal Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: " + str(
                 Number_Of_Second_Extending_But_Same_Genomes))
 
-    if options.gene_presence_absence_out != None:
+    if options.gene_presence_absence_out != False:
         gene_presence_absence_output(options,genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
     if options.run_mode == 'Full':

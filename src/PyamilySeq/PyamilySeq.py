@@ -124,8 +124,8 @@ def main():
     output_args.add_argument('-original_fasta', action='store', dest='original_fasta',
                           help='FASTA file to use in conjunction with "-w" or "-con" when running in Partial Mode.',
                           required=False)
-    output_args.add_argument('-gpa', action='store_true', dest='gene_presence_absence_out', default=None,
-                             help='Default - False: If selected, a Roary/Panaroo formatted gene_presence_absence.csv will be created - Required for Coinfinder and other downstream tools',
+    output_args.add_argument('-no_gpa', action='store_false', dest='gene_presence_absence_out',
+                          help='Do not create a Roary/Panaroo formatted gene_presence_absence.csv (created by default) - Required for Coinfinder and other downstream tools',
                           required=False)
 
     ### Misc Arguments

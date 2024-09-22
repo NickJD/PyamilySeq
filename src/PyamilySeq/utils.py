@@ -5,6 +5,7 @@ import glob
 import collections
 from tempfile import NamedTemporaryFile
 import sys
+from line_profiler_pycharm import profile
 
 
 ################### We are currently fixed using Table 11
@@ -29,6 +30,66 @@ gencode = {
 def translate_frame(sequence):
     translate = ''.join([gencode.get(sequence[3 * i:3 * i + 3], 'X') for i in range(len(sequence) // 3)])
     return translate
+
+@profile
+def calculate_similarity(seq1, seq2):
+    len1, len2 = len(seq1), len(seq2)
+
+    # If lengths are the same, directly compare without alignment
+    if len1 == len2:
+        matches = sum(c1 == c2 for c1, c2 in zip(seq1, seq2))
+        return (matches / len1) * 100  # Return similarity based on the length
+
+    # For different lengths, proceed with global alignment
+    # Initialize the scoring matrix
+    score_matrix = [[0] * (len2 + 1) for _ in range(len1 + 1)]
+
+    # Fill the first row and first column with gap penalties
+    for i in range(len1 + 1):
+        score_matrix[i][0] = -i  # Gap penalty for seq1
+    for j in range(len2 + 1):
+        score_matrix[0][j] = -j  # Gap penalty for seq2
+
+    # Fill the score matrix
+    for i in range(1, len1 + 1):
+        for j in range(1, len2 + 1):
+            match = score_matrix[i - 1][j - 1] + (1 if seq1[i - 1] == seq2[j - 1] else -1)
+            delete = score_matrix[i - 1][j] - 1  # Gap in seq2
+            insert = score_matrix[i][j - 1] - 1  # Gap in seq1
+            score_matrix[i][j] = max(match, delete, insert)
+
+    # Traceback to find the alignment (if needed for detailed output)
+    aligned_seq1, aligned_seq2 = "", ""
+    i, j = len1, len2
+
+    while i > 0 or j > 0:
+        current_score = score_matrix[i][j]
+        if i > 0 and j > 0 and current_score == score_matrix[i - 1][j - 1] + (1 if seq1[i - 1] == seq2[j - 1] else -1):
+            aligned_seq1 += seq1[i - 1]
+            aligned_seq2 += seq2[j - 1]
+            i -= 1
+            j -= 1
+        elif i > 0 and current_score == score_matrix[i - 1][j] - 1:
+            aligned_seq1 += seq1[i - 1]
+            aligned_seq2 += "-"
+            i -= 1
+        else:
+            aligned_seq1 += "-"
+            aligned_seq2 += seq2[j - 1]
+            j -= 1
+
+    # Reverse the aligned sequences if needed
+    aligned_seq1 = aligned_seq1[::-1]
+    aligned_seq2 = aligned_seq2[::-1]
+
+    # Calculate matches from aligned sequences
+    matches = sum(c1 == c2 for c1, c2 in zip(aligned_seq1, aligned_seq2))
+
+    # Calculate the similarity percentage based on the maximum length
+    max_length = max(len(seq1), len(seq2))
+    return (matches / max_length) * 100
+
+
 
 def is_tool_installed(tool_name):
     """Check if a tool is installed and available in PATH."""
@@ -265,30 +326,57 @@ def read_fasta_files(input_dir, name_split, combined_out, translate):
                     combined_out_file.write(f">{genome_name}|{id}\n{wrapped_sequence}\n")
 
 
-def write_groups(options,output_dir, key_order, cores, sequences, pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences):
+def write_groups(options, output_dir, key_order, cores, sequences,
+                 pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences):
+    """
+    Writes individual FASTA files and a combined FASTA file for all sequences.
+
+    Parameters:
+    - options: Command-line options.
+    - output_dir: Directory where output FASTA files will be saved.
+    - key_order: The order in which to process keys.
+    - cores: Dictionary of core genes.
+    - sequences: Dictionary mapping headers to sequences.
+    - pangenome_clusters_First_sequences_sorted: Dictionary of first sequence clusters.
+    - combined_pangenome_clusters_Second_sequences: Dictionary of second sequence clusters.
+    """
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
-    for key_prefix in key_order:
-        for key, values in cores.items():
-            if any(part in options.write_groups.split(',') for part in key.split('_')):
-                if key.startswith(key_prefix):
-                    for value in values:
-                        output_filename = f"{key}_{value}.fasta"
-                        if 'First' in key_prefix:
-                            sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
-                        else: # combined_pangenome_clusters_Second_sequences is None if reclustered isn't being used
-                            sequences_to_write = combined_pangenome_clusters_Second_sequences[value]
-                            # Write sequences to output file that are in the sequences dictionary
-                        with open(os.path.join(output_dir, output_filename), 'w') as outfile:
-                            for header in sequences_to_write:
-                                if header in sequences:
-                                    outfile.write(f">{header}\n")
-                                    wrapped_sequence = wrap_sequence(sequences[header])
-                                    outfile.write(f"{wrapped_sequence}\n")
-                                else:
-                                    if options.verbose == True:
-                                        print("Sequence " + header + " Not found in original_fasta file.")
+
+    combined_fasta_filename = os.path.join(output_dir, "combined_group_sequences.fasta")
+
+    # Open combined FASTA file for writing all sequences
+    with open(combined_fasta_filename, 'w') as combined_fasta:
+        for key_prefix in key_order:
+            for key, values in cores.items():
+                if any(part in options.write_groups.split(',') for part in key.split('_')):
+                    if key.startswith(key_prefix):
+                        for value in values:
+                            output_filename = f"{key}_{value}.fasta"
+                            if 'First' in key_prefix:
+                                sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
+                            else:
+                                sequences_to_write = combined_pangenome_clusters_Second_sequences[value]
+
+                            # Write individual FASTA file
+                            with open(os.path.join(output_dir, output_filename), 'w') as outfile:
+                                for header in sequences_to_write:
+                                    if header in sequences:
+                                        sequence = sequences[header]
+                                        outfile.write(f">{header}\n")
+                                        wrapped_sequence = wrap_sequence(sequence)
+                                        outfile.write(f"{wrapped_sequence}\n")
+
+                                        # Also write to the combined FASTA file
+                                        combined_fasta.write(f">Group_{value}|{header}\n")
+                                        combined_fasta.write(f"{wrapped_sequence}\n")
+                                    else:
+                                        if options.verbose:
+                                            print(f"Sequence {header} not found in original_fasta file.")
+
+    print(f"Combined FASTA file saved to: {combined_fasta_filename}")
+
 
 def process_gene_families(options, directory, output_file):
     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""

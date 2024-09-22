@@ -12,6 +12,8 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from utils import *
 
 
+#def output_fasta(options, gene_families):
+
 def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
     output_dir = os.path.abspath(options.output_dir)
@@ -227,7 +229,7 @@ def cluster(options):
             outfile.write("\nTotal Number of First Gene Groups That Had Additional Second Sequences But Not New Genomes: " + str(
                 Number_Of_Second_Extending_But_Same_Genomes))
         #Report number of first and second clusters and do the ame for genus
-    if options.gene_presence_absence_out != None:
+    if options.gene_presence_absence_out != False:
         gene_presence_absence_output(options,genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
 
@@ -255,7 +257,6 @@ def cluster(options):
         if options.write_groups != None and options.fasta != None:
             print("Outputting gene group FASTA files")
             sequences = read_fasta(options.fasta)
-            #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
             output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
             write_groups(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
