@@ -110,11 +110,13 @@ def read_cd_hit_output(clustering_output):
                     clustered_header = clustered_info.split('>')[1].split('...')[0]
                     clustered_header = '>' + clustered_header
 
-                    if 'at +' in clustered_info:
-                        percent_identity = float(clustered_info.split('at +/')[1].strip().replace('%', ''))
+                    if 'at' in clustered_info:
+                        percent_identity = extract_identity(line)
 
-                    if '*' in line:
+                    elif '*' in line:
                         percent_identity = 100.0
+                    else:
+                        raise ValueError("Percent identity not found in the string.")
 
                     clusters[current_cluster_id].append({
                         'header': clustered_header,
@@ -129,7 +131,6 @@ def separate_groups(input_fasta, options, clustering_mode):
     groups, genome_count = read_fasta_groups(input_fasta)
 
     paralog_groups = defaultdict(int)  # To track number of paralog groups
-
 
     for group_header, sequences in groups.items():
         group_name = group_header.split('|')[0]  # Get the group part (e.g., '>Group_n')
@@ -149,11 +150,12 @@ def separate_groups(input_fasta, options, clustering_mode):
 
         group_file_name = group_name.replace('>','')
 
-        temp_fasta = f"{options.output_dir}{group_file_name}.fasta"
+        temp_fasta = f"{options.output_dir}/{group_file_name}.fasta"
         write_fasta(sequences, temp_fasta)
 
         # Run cd-hit on the individual group
         clustering_output = f"{options.output_dir}/{group_file_name}_clustering"
+
         run_cd_hit(options, temp_fasta, clustering_output, clustering_mode)
 
         # Read the clustering results to find subgroups
@@ -255,7 +257,7 @@ def separate_groups(input_fasta, options, clustering_mode):
 
                 # Determine the next subgroup for this genome
                 subgroup_id = genome_count[genome] % num_subgroups
-                new_header = f"{options.output_dir}/{group_file_name}_subgroup_{subgroup_id}|{genome}|{header.split('|')[2]}"
+                new_header = f"{group_file_name}_subgroup_{subgroup_id}|{genome}|{header.split('|')[2]}"
                 subgroup_sequences[subgroup_id].append((new_header, seq))
 
                 # Increment the count for this genome
@@ -265,6 +267,12 @@ def separate_groups(input_fasta, options, clustering_mode):
             for subgroup_id, seqs in subgroup_sequences.items():
                 subgroup_file = f"{options.output_dir}/{group_file_name}_subgroup_{subgroup_id}.fasta"
                 write_fasta(seqs, subgroup_file)
+
+                # Increment subgroup ID globally for the next subgroup
+                subgroup_id += 1
+                paralog_groups[group_name] += 1  # Count this group as a paralog group
+
+
 
         # Clean up temporary fasta file if the option is set
         if options.delete_temp_files:
@@ -288,6 +296,9 @@ def main():
     required.add_argument('-input_fasta', action='store', dest='input_fasta',
                           help='Input FASTA file containing gene groups.',
                           required=True)
+    required.add_argument('-sequence_type', action='store', dest='sequence_type', default='DNA',choices=['AA', 'DNA'],
+                          help='Default - DNA: Are groups "DNA" or "AA" sequences?',
+                          required=False)
     required.add_argument('-output_dir', action='store', dest='output_dir',
                           help='Output directory.',
                           required=True)
@@ -305,8 +316,8 @@ def main():
     optional.add_argument('-percent_threshold', action='store', dest='percent_threshold', type=float, default=80,
                           help='Minimum percentage of genomes with paralogs (default: 80.0)')
     optional.add_argument('-verbose', action='store_true', dest='verbose', help='Print verbose output.')
-    optional.add_argument('-delete_temp_files', action='store_true', dest='delete_temp_files',
-                          help='Delete all temporary files after processing.')
+    optional.add_argument('-no_delete_temp_files', action='store_false', dest='delete_temp_files',
+                          help='Default: Delete all temporary files after processing.')
 
     misc = parser.add_argument_group('Misc Arguments')
     misc.add_argument('-v', action='store_true', dest='version',
@@ -325,7 +336,11 @@ def main():
     if not os.path.exists(options.output_dir):
         os.makedirs(options.output_dir)
 
-    clustering_mode = 'cd-hit-est'
+    if options.sequence_type == 'DNA':
+        clustering_mode = 'cd-hit-est'
+    else:
+        clustering_mode = 'cd-hit'
+
     separate_groups(options.input_fasta, options, clustering_mode)
 
     print("Done")

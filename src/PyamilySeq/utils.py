@@ -6,6 +6,7 @@ import collections
 from tempfile import NamedTemporaryFile
 import sys
 from line_profiler_pycharm import profile
+import re
 
 
 ################### We are currently fixed using Table 11
@@ -110,11 +111,22 @@ def reverse_complement(seq):
     complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
     return ''.join(complement[base] for base in reversed(seq))
 
+
 def fix_path(path):
     fixed_path = os.path.normpath(path)
     fixed_path = os.path.realpath(fixed_path)
     return fixed_path
 
+
+def extract_identity(clustered_info):
+    # Use regular expressions to capture the percentage value at the end of the line
+    match = re.search(r'at ([-+]*)(\d+\.\d+)%', clustered_info)
+
+    if match:
+        percent_identity = float(match.group(2))  # Extract the percentage value
+        return percent_identity
+    else:
+        raise ValueError("Percent identity not found in the string.")
 
 def wrap_sequence(sequence, width=60):
     wrapped_sequence = []
@@ -172,14 +184,15 @@ def run_mafft_on_sequences(options, sequences, output_file):
         with open(output_file, 'w') as output_f:
             if options.verbose == True:
                 subprocess.run(
-                    ['mafft', '--auto', temp_input_file_path],
+                    ['mafft', '--auto', '--thread', str(options.threads), temp_input_file_path],
                     stdout=output_f,
                     stderr=sys.stderr,
                     check=True
                 )
+
             else:
                 subprocess.run(
-                    ['mafft', '--auto', temp_input_file_path],
+                    ['mafft', '--auto', '--thread', str(options.threads), temp_input_file_path],
                     stdout=output_f,
                     stderr=subprocess.DEVNULL,  # Suppress stderr
                     check=True
@@ -385,7 +398,7 @@ def process_gene_families(options, directory, output_file):
 
     # Iterate over each gene family file
     for gene_file in os.listdir(directory):
-        if gene_file.endswith('.fasta'):
+        if gene_file.endswith('.fasta') and not gene_file.endswith('combined_group_sequences.fasta'):
             gene_path = os.path.join(directory, gene_file)
 
             # Read sequences from the gene family file
@@ -395,13 +408,15 @@ def process_gene_families(options, directory, output_file):
             longest_sequences = select_longest_gene(sequences)
 
             # Run mafft on the longest sequences
-            aligned_file = f"{gene_file}_aligned.fasta"
+            aligned_file = f"{directory}/{gene_file}_aligned.fasta.tmp"
             run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
 
             # Read aligned sequences and concatenate them
             aligned_sequences = read_fasta(aligned_file)
             for genome, aligned_seq in aligned_sequences.items():
                 genome_name = genome.split('|')[0]
+                if 'Group' in genome_name:
+                    print(2)
                 if genome_name not in concatenated_sequences:
                     concatenated_sequences[genome_name] = ""
                 concatenated_sequences[genome_name] += aligned_seq

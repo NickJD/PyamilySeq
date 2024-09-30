@@ -27,7 +27,7 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-o', clustering_output,
         '-c', str(options.pident),
         '-s', str(options.len_diff),
-        '-T', str(options.clustering_threads),
+        '-T', str(options.threads),
         '-M', str(options.clustering_memory),
         '-d', "0",
         '-sc', "1",
@@ -84,8 +84,8 @@ def main():
     clustering_args.add_argument("-mem", action="store", dest="clustering_memory", type=int, default=4000,
                           help="Default 4000: Memory to be allocated for clustering (in MBs).",
                           required=False)
-    clustering_args.add_argument("-t", action="store", dest="clustering_threads", type=int, default=4,
-                          help="Default 4: Threads to be allocated for clustering.",
+    clustering_args.add_argument("-t", action="store", dest="threads", type=int, default=8,
+                          help="Default 8: Threads to be allocated for clustering and/or alignment.",
                           required=False)
 
     ###Partial-Mode Arguments
@@ -130,8 +130,9 @@ def main():
 
     ### Misc Arguments
     misc = parser.add_argument_group('Misc')
-    misc.add_argument('-verbose', action='store_true', dest='verbose', default=None,                        help='Default - False: Print out runtime messages',
-                        required = False)
+    misc.add_argument('-verbose', action='store_true', dest='verbose', default=None,
+                      help='Default - False: Print out runtime messages',
+                      required = False)
     misc.add_argument('-v', action='store_true', dest='version',
                         help='Default - False: Print out version number and exit',
                         required=False)
@@ -254,6 +255,7 @@ def main():
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_groups = options.write_groups
+                self.threads = options.threads
                 self.align_core = options.align_core
                 self.fasta = combined_out_file
                 self.verbose = options.verbose
@@ -272,6 +274,7 @@ def main():
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_groups = options.write_groups
+                self.threads = options.threads
                 self.align_core = options.align_core
                 self.fasta = options.original_fasta
                 self.verbose = options.verbose
