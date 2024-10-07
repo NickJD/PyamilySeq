@@ -1,2 +1,2 @@
-PyamilySeq_Version = 'v0.8.1'
+PyamilySeq_Version = 'v0.9.0'
 

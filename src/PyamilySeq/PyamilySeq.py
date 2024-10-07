@@ -30,6 +30,7 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-T', str(options.threads),
         '-M', str(options.clustering_memory),
         '-d', "0",
+        '-g', "1",
         '-sc', "1",
         '-sf', "1"
     ]
@@ -42,7 +43,7 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
 def main():
     parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': A tool that groups genes into unique clusters.')
     ### Required Arguments
-    required = parser.add_argument_group('Required Arguments')
+    required = parser.add_argument_group('Required Parameters')
     required.add_argument('-run_mode', action='store', dest='run_mode', choices=['Full','Partial'],
                           help='Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?',
                           required=True)
@@ -56,7 +57,7 @@ def main():
                           help="Directory for all output files.",
                           required=True)
     ### Full-Mode Arguments
-    full_mode_args = parser.add_argument_group('Full-Mode Arguments - Required when "-run_mode Full" is used')
+    full_mode_args = parser.add_argument_group('Full-Mode Parameters - Required when "-run_mode Full" is used')
     full_mode_args.add_argument("-input_type", action="store", dest="input_type", choices=['separate', 'combined'],
                           help="Type of input files: 'separate' for separate FASTA and GFF files,"
                              " 'combined' for GFF files with embedded FASTA sequences.",
@@ -89,13 +90,13 @@ def main():
                           required=False)
 
     ###Partial-Mode Arguments
-    partial_mode_args = parser.add_argument_group('Partial-Mode Arguments - Required when "-run_mode Partial" is used')
-    partial_mode_args.add_argument('-cluster_file', action='store', dest='cluster_file',
-                        help='Clustering output file containing CD-HIT, TSV or CSV Edge List',
+    partial_mode_args = parser.add_argument_group("Partial-Mode Parameters - Required when '-run_mode Partial' is used")
+    partial_mode_args.add_argument("-cluster_file", action="store", dest="cluster_file",
+                        help="Clustering output file containing CD-HIT, TSV or CSV Edge List",
                         required=False)
 
     ###Grouping Arguments
-    grouping_args = parser.add_argument_group('Grouping Arguments - Use to fine-tune grouping of genes after clustering')
+    grouping_args = parser.add_argument_group('Grouping Parameters - Use to fine-tune grouping of genes after clustering')
     grouping_args.add_argument('-reclustered', action='store', dest='reclustered',
                         help='Currently only works on Partial Mode: Clustering output file from secondary round of clustering.',
                         required=False)
@@ -129,19 +130,20 @@ def main():
                           required=False)
 
     ### Misc Arguments
-    misc = parser.add_argument_group('Misc')
-    misc.add_argument('-verbose', action='store_true', dest='verbose', default=None,
-                      help='Default - False: Print out runtime messages',
-                      required = False)
-    misc.add_argument('-v', action='store_true', dest='version',
-                        help='Default - False: Print out version number and exit',
-                        required=False)
+    misc = parser.add_argument_group("Misc Parameters")
+    misc.add_argument("-verbose", action="store_true", dest="verbose",
+                      help="Print verbose output.",
+                      required=False)
+    misc.add_argument("-v", "--version", action="version",
+                      version=f"PyamilySeq version {PyamilySeq_Version} - Exiting",
+                      help="Print out version number and exit")
+
 
     options = parser.parse_args()
+    print("Running PyamilySeq: " + PyamilySeq_Version)
 
     ### Checking all required parameters are provided by user #!!# Doesn't seem to work
     if options.run_mode == 'Full':
-
         if options.reclustered != None:
             sys.exit("Currently reclustering only works on Partial Mode.")
         required_full_mode = [options.input_type, options.input_dir, options.name_split, options.clustering_format,
@@ -291,5 +293,4 @@ def main():
           "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")
 
 if __name__ == "__main__":
-    print("Running PyamilySeq "+PyamilySeq_Version)
     main()

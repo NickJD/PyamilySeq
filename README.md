@@ -19,19 +19,18 @@ PyamilySeq probably requires Python 3.6 or higher. Install using pip:
 ```bash
 pip install PyamilySeq
 ```
-
+PyamilySeq is regularly updated with bugfixes and new features so to update to the newest version add '-U' to end of the pip install command.
 ## Example usage: Below are two examples of running PyamilySeq in its two main modes.
 ### 'Full Mode': Will conduct clustering of sequences with CD-HIT as part of PyamilySeq run
 ```
 PyamilySeq -run_mode Full -group_mode Species -clustering_format CD-HIT  -output_dir .../test_data/testing/Full 
--input_type combined -input_dir .../test_data/genomes -name_split _combined.gff3 -pid 0.95 -len_diff 0.80 
--gpa -a -w 99
+-input_type combined -input_dir .../test_data/genomes -name_split _combined.gff3 -pid 0.95 -len_diff 0.80 -a -w 99
 ```
 ### 'Partial Mode': Will take the output of a sequence clustering.
 ```
-PyamilySeq -run_mode Partial -group_mode Species -clustering_format TSV -output_dir .../test_data/Species/testing/Partial 
--cluster_file .../test_data/Species/MMseqs2/combined_Ensmbl_pep_cluster.tsv 
--original_fasta .../test_data/species/combined_Ensmbl_cds.fasta -gpa -a -w 99 -verbose 
+PyamilySeq -run_mode Partial -group_mode Species -clustering_format TSV -output_dir .../test_data/species/testing/Partial 
+-cluster_file .../test_data/species/MMseqs2/combined_Ensmbl_pep_cluster.tsv 
+-original_fasta .../test_data/species/combined_Ensmbl_cds.fasta -a -w 99 -verbose 
 
 ```
 #### Note: '-clustering_format TSV/CSV' requires input to be two in two columns as below (Same format as MMseqs2 tsv) - Genome name and sequence name are separated by '|'.
@@ -43,7 +42,7 @@ Escherichia_coli_110957|ENSB:TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB:TIZS9k
 ```
 ### Example output:
 ```
-Running PyamilySeq v0.8.1
+Running PyamilySeq v0.9.0
 Calculating Groups
 Gene Groups:
 First_core_99: 2682
@@ -65,7 +64,7 @@ PyamilySeq -run_mode Partial -group_mode Genus -clustering_format CD-HIT -output
  -cluster_file .../test_data/genus/CD-HIT/combined_cds_cd-hit_80_60.clstr -gpa 
 ```
 ```commandline
-Running PyamilySeq v0.8.1
+Running PyamilySeq v0.9.0
 Calculating Groups
 Genus Groups:
 First_genera_1:	28549
@@ -122,14 +121,14 @@ Please report any issues to: https://github.com/NickJD/PyamilySeq/issues
 ## PyamilySeq - Menu: 
 ### PyamilySeq is separated into two main 'run modes', Full and Partial. They each have their own set of required and optional arguments. 
 ```
-Running PyamilySeq v0.8.1
+Running PyamilySeq v0.9.0
 usage: PyamilySeq.py [-h] -run_mode {Full,Partial} -group_mode {Species,Genus} -clustering_format {CD-HIT,TSV,CSV} -output_dir OUTPUT_DIR
                      [-input_type {separate,combined}] [-input_dir INPUT_DIR] [-name_split NAME_SPLIT] [-sequence_type {AA,DNA}] [-gene_ident GENE_IDENT]
                      [-pid PIDENT] [-len_diff LEN_DIFF] [-mem CLUSTERING_MEMORY] [-t CLUSTERING_THREADS] [-cluster_file CLUSTER_FILE]
                      [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG] [-core_groups CORE_GROUPS] [-genus_groups GENUS_GROUPS] [-w WRITE_GROUPS] [-a]
                      [-original_fasta ORIGINAL_FASTA] [-gpa] [-verbose] [-v]
 
-PyamilySeq v0.8.1: A tool that groups genes into unique clusters.
+PyamilySeq v0.9.0: A tool that groups genes into unique clusters.
 
 options:
   -h, --help            show this help message and exit
@@ -183,15 +182,16 @@ Output Parameters:
   -w WRITE_GROUPS       Default - No output: Output sequences of identified groups (provide levels at which to output - Species "-w 99,95" Genus "-w 2,3" -
                         Must provide FASTA file with -original_fasta if in Partial run mode.
   -a                    Default - No output: SLOW! (Only works for Species mode) Output aligned and concatinated sequences of identified groups -provide
-                        group levels at which to output "-w 99,95" - Must provide FASTA file with -original_fasta in Partial run mode.
+                        group levels at which to output "-w 99,95" - Must provide FASTA file with -original_fasta in Partialrun mode.
   -original_fasta ORIGINAL_FASTA
-                        FASTA file to use in conjunction with "-w" or "-a" when running in Partial Mode.
-  -gpa                  Default - False: If selected, a Roary/Panaroo formatted gene_presence_absence.csv will be created - Required for Coinfinder and
-                        other downstream tools
+                        FASTA file to use in conjunction with "-w" or "-con" when running in Partial Mode.
+  -no_gpa               Do not create a Roary/Panaroo formatted gene_presence_absence.csv (created by default) - Required for Coinfinder and other
+                        downstream tools
 
-Misc:
-  -verbose              Default - False: Print out runtime messages
-  -v                    Default - False: Print out version number and exit
+Misc Parameters:
+  -verbose              Print verbose output.
+  -v, --version         Print out version number and exit
+
 ```
 
 
@@ -201,13 +201,14 @@ Misc:
 ## Seq-Combiner: This tool is provided to enable the pre-processing of multiple GFF/FASTA files together ready to be clustered by the user.
 ### Example:
 ```bash
-Seq-Combiner -input_dir .../test_data/genomes -name_split _combined.gff3 -output_dir.../test_data -output_name combine_fasta_seqs.fa -input_type combined
+Seq-Combiner -input_dir .../test_data/genomes -name_split .gff3 -output_dir .../test_data/genomes -output_name combine_fasta_seqs.fa -input_type combined
 ```
 ### Seq-Combiner Menu:
 ```
-usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
+usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name
+                       OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-Seq-Combiner v0.8.1: A tool to extract sequences from GFF/FASTA files.
+PyamilySeq v0.9.0: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -215,7 +216,8 @@ options:
 Required Arguments:
   -input_dir INPUT_DIR  Directory location where the files are located.
   -input_type {separate,combined,fasta}
-                        Type of input files: "separate" for separate FASTA and GFF files, "combined" for GFF files with embedded FASTA sequences and "fasta" for combining multiple FASTA files together.
+                        Type of input files: "separate" for separate FASTA and GFF files, "combined" for GFF files with embedded FASTA sequences and "fasta"
+                        for combining multiple FASTA files together.
   -name_split NAME_SPLIT
                         substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').
   -output_dir OUTPUT_DIR
@@ -225,48 +227,103 @@ Required Arguments:
 
 Optional Arguments:
   -gene_ident GENE_IDENT
-                        Default - "CDS": Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo" - Not compatible with "fasta" input mode.
+                        Default - "CDS": Identifier used for extraction of sequences such as
+                        "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo" - Not compatible with "fasta" input mode.
   -translate            Default - False: Translate extracted sequences to their AA counterpart?
 
 Misc Arguments:
-  -v                    Print out version number and exit
-
-
-```
-
-### Group-Splitter menu: 
+  -v, --version         Print out version number and exit
 
 ```
-usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -output_dir OUTPUT_DIR [-pident PIDENT] [-len_diff LEN_DIFF] [-clustering_threads CLUSTERING_THREADS]
-                         [-clustering_memory CLUSTERING_MEMORY] [-percent_threshold PERCENT_THRESHOLD] [-verbose] [-delete_temp_files] [-v]
 
-Group-Splitter: v0.8.1: A tool to split "paralogous" groups identified by PyamilySeq.
+## Group-Splitter: This tool can split multi-copy gene groups using CD-HIT after initial PyamilySeq analysis.
+### Example:
+```bash
+Group-Splitter -genome_num 74 -input_fasta .../test/species/ -output_dir .../test/species/ -sequence_type AA
+```
+### Group-Splitter Menu:
+```
+usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -sequence_type {AA,DNA}
+                         -genome_num GENOME_NUM -output_dir OUTPUT_DIR
+                         [-groups GROUPS] [-group_threshold GROUP_THRESHOLD]
+                         [-c PIDENT] [-s LEN_DIFF] [-T CLUSTERING_THREADS]
+                         [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
+                         [-verbose] [-v]
+
+PyamilySeq v0.9.0: Group-Splitter - A tool to split multi-copy gene groups
+identified by PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
 
-Required Arguments:
+Required Parameters:
   -input_fasta INPUT_FASTA
                         Input FASTA file containing gene groups.
   -sequence_type {AA,DNA}
                         Default - DNA: Are groups "DNA" or "AA" sequences?
+  -genome_num GENOME_NUM
+                        The total number of genomes must be provide
   -output_dir OUTPUT_DIR
                         Output directory.
 
-Optional Arguments:
-  -pident PIDENT        Sequence identity threshold (default: 0.9)
-  -len_diff LEN_DIFF    Length difference threshold (default: 0.05)
-  -clustering_threads CLUSTERING_THREADS
-                        Number of threads for clustering (default: 4)
-  -clustering_memory CLUSTERING_MEMORY
-                        Memory limit in MB for clustering (default: 2000)
-  -percent_threshold PERCENT_THRESHOLD
-                        Minimum percentage of genomes with paralogs (default: 80.0)
-  -verbose              Print verbose output.
-  -delete_temp_files    Delete all temporary files after processing.
+Regrouping Parameters:
+  -groups GROUPS        Default - auto: Detect groups to be split (see
+                        -group_threshold). Provide "-groups 1,2,3,4" with
+                        group IDs to split specific groups.
+  -group_threshold GROUP_THRESHOLD
+                        Minimum percentage of genomes with multi-copy
+                        (default: 80.0) - Does not work with "-groups"
 
-Misc Arguments:
-  -v                    Print out version number and exit
+CD-HIT Reclustering Parameters:
+  -c PIDENT             Sequence identity threshold (default: 0.8) - Probably
+                        should be higher than what was used in initial
+                        clustering.
+  -s LEN_DIFF           Length difference cutoff (default: 0.20) - Often the
+                        most impactful parameter to split 'multi-copy' gene
+                        groups.
+  -T CLUSTERING_THREADS
+                        Number of threads for clustering (default: 4)
+  -M CLUSTERING_MEMORY  Memory limit in MB for clustering (default: 2000)
+
+Misc Parameters:
+  -no_delete_temp_files
+                        Default: Delete all temporary files after processing.
+  -verbose              Print verbose output.
+  -v, --version         Print out version number and exit
+
+```
+
+## Cluster-Summary menu: This tool can be used to summarise CD-HIT .clstr files:
+### Example:
+```bash
+Cluster-Summary -genome_num 74 -input_clstr .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80.clstr -output_tsv .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80_Summary.tsv
+```
+### Cluster-Summary Menu: 
+```
+usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
+                          [-output_dir OUTPUT_DIR] [-verbose] [-v]
+
+PyamilySeq v0.9.0: Cluster-Summary - A tool to summarise CD-HIT clustering files.
+
+options:
+  -h, --help            show this help message and exit
+
+Required Parameters:
+  -input_clstr INPUT_CLSTR
+                        Input CD-HIT .clstr file
+  -output OUTPUT        Output TSV file to store cluster summaries - Will add '.tsv' if not
+                        provided by user
+  -genome_num GENOME_NUM
+                        The total number of genomes must be provide
+
+Optional Arguments:
+  -output_dir OUTPUT_DIR
+                        Default: Same as input file
+
+Misc Parameters:
+  -verbose              Print verbose output.
+  -v, --version         Print out version number and exit
+
 ```
 
 ### All example input and output data can be found  in the 'test_data' directory.

@@ -11,7 +11,7 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Seq-Combiner ' + PyamilySeq_Version + ': A tool to extract sequences from GFF/FASTA files.')
+    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.')
     ### Required Arguments
     required = parser.add_argument_group('Required Arguments')
     required.add_argument('-input_dir', action='store', dest='input_dir',
@@ -31,6 +31,7 @@ def main():
     required.add_argument("-output_name", action="store", dest="output_file",
                           help="Output file name.",
                           required=True)
+
     optional = parser.add_argument_group('Optional Arguments')
     optional.add_argument('-gene_ident', action='store', dest='gene_ident', default='CDS',
                           help='Default - "CDS": Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo"'
@@ -40,9 +41,9 @@ def main():
                           help='Default - False: Translate extracted sequences to their AA counterpart?',
                           required=False)
     misc = parser.add_argument_group('Misc Arguments')
-    misc.add_argument('-v', action='store_true', dest='version',
-                         help='Print out version number and exit',
-                         required=False)
+    misc.add_argument("-v", "--version", action="version",
+                      version=f"PyamilySeq: Seq-Combiner version {PyamilySeq_Version} - Exiting",
+                      help="Print out version number and exit")
 
     options = parser.parse_args()
 
@@ -50,6 +51,9 @@ def main():
         sys.exit(PyamilySeq_Version)
 
     output_path = os.path.abspath(options.output_dir)
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
+
     combined_out_file = os.path.join(output_path, options.output_file)
 
     if options.input_type == 'separate':
