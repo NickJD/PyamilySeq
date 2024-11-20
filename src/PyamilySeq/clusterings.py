@@ -52,6 +52,107 @@ def cluster_CDHIT(options, splitter):
 
     return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
+def cluster_BLAST(options, splitter):
+    separator = '\t'
+    First_in = open(options.clusters, 'r')
+    pangenome_clusters_First = OrderedDict()
+    pangenome_clusters_First_genomes = defaultdict(list)
+    pangenome_clusters_First_sequences = defaultdict(list)
+    taxa_dict = defaultdict(int)
+    reps = OrderedDict()
+    edges = defaultdict(list)
+    for line in First_in:
+        elements = line.strip().split(separator)
+        rep, child = elements[0], elements[1]
+        child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
+        # Counting occurrences of genomes
+        taxa_dict[child_taxa] += 1
+        edges[rep].append(child)
+        edges[child].append(rep)
+
+    visited = set()
+    cluster_id = 0
+
+    def dfs(node, cluster_id):
+        stack = [node]
+        tmp_genomes = []
+        while stack:
+            current = stack.pop()
+            if current not in visited:
+                visited.add(current)
+                clustered_taxa = current.split(splitter)[0]
+                pangenome_clusters_First_sequences[cluster_id].append(current)
+                if clustered_taxa not in pangenome_clusters_First[cluster_id]:
+                    pangenome_clusters_First[cluster_id].append(clustered_taxa)
+                    tmp_genomes.append(clustered_taxa)
+                for neighbor in edges[current]:
+                    if neighbor not in visited:
+                        stack.append(neighbor)
+
+        pangenome_clusters_First_genomes[node] = tmp_genomes
+
+    for node in edges:
+        if node not in visited:
+            pangenome_clusters_First[cluster_id] = []
+            pangenome_clusters_First_sequences[cluster_id] = []
+            pangenome_clusters_First_genomes[node] = []
+            dfs(node, cluster_id)
+            cluster_id += 1
+
+    for rep in pangenome_clusters_First:
+        cluster_size = len(pangenome_clusters_First_sequences[rep])
+        reps[rep] = [cluster_size, len(pangenome_clusters_First[rep])]
+
+    return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
+
+def cluster_MMseqs(options,splitter):
+    separator = '\t'
+    cluster_id = 0
+    last_rep = ''
+    first = True
+    First_in = open(options.clusters, 'r')
+    pangenome_clusters_First = OrderedDict()
+    pangenome_clusters_First_genomes = OrderedDict()
+    pangenome_clusters_First_sequences = OrderedDict()
+    taxa_dict = defaultdict(int)
+    reps = OrderedDict()
+    tmp_genomes = None
+    for line in First_in:
+
+        elements = line.strip().split(separator)
+        rep, child = elements[0], elements[1]
+        child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
+        # Counting occurrences of genomes
+        taxa_dict[child_taxa] += 1
+        if first == True:
+            pangenome_clusters_First['0'] = []
+            pangenome_clusters_First_sequences['0'] = []
+            first = False
+            tmp_genomes = []
+
+        if rep != last_rep and last_rep != '':
+            pangenome_clusters_First_genomes[rep] = tmp_genomes
+            tmp_genomes = []
+            cluster_id +=1
+            pangenome_clusters_First[str(cluster_id)] = []
+            pangenome_clusters_First_sequences[str(cluster_id)] = []
+            cluster_size = len(pangenome_clusters_First_sequences[str(cluster_id-1)])
+            reps.update({last_rep: [cluster_size, len(pangenome_clusters_First[str(cluster_id-1)])]})
+            pangenome_clusters_First[str(cluster_id)] = []
+            pangenome_clusters_First_sequences[str(cluster_id)] = []
+        if child_taxa not in pangenome_clusters_First[str(cluster_id)]:
+            pangenome_clusters_First[str(cluster_id)].append(child_taxa)
+            tmp_genomes.append(child_taxa)
+
+        pangenome_clusters_First_sequences[str(cluster_id)].append(child)
+        last_rep = rep
+        cluster_size = len(pangenome_clusters_First_sequences[str(cluster_id)])
+        reps.update({rep: [cluster_size, len(pangenome_clusters_First[str(cluster_id)])]})
+
+    #!!# May not be needed below
+    pangenome_clusters_First_genomes[rep] = tmp_genomes
+
+    return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
 
 #@profile
@@ -138,10 +239,10 @@ def single_clustering_counting(pangenome_clusters_First, reps):
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
     list_of_reps = list(reps.keys())
     for cluster, First_taxa in pangenome_clusters_First.items():
-        rep = list_of_reps[int(cluster)]  # get the rep of the current pep cluster
+        rep = list_of_reps[int(cluster)]  # get the rep of the current cluster
 
         try:  # get the cluster from the storf clusters which contains this rep
-            num_clustered_First[str(cluster)].append(rep + '_' + str(len(First_taxa)))
+            num_clustered_First[str(cluster)].append(str(rep) + '_' + str(len(First_taxa)))
             size_of_First_clusters = []
             Firsts = num_clustered_First[str(cluster)]
             for First in Firsts:
@@ -178,6 +279,8 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
     first = True
     for line in Second_in:
         if line.startswith('>'):
+            if '>Cluster 1997' in line:
+                print()
             if first == False:
                 cluster_size = len(Combined_clusters[cluster_id])
                 Combined_reps.update({rep: cluster_size})
@@ -196,6 +299,7 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
                         VALUE = combined_pangenome_clusters_Second_sequences[cluster_id]
                     KEY = combined_pangenome_clusters_First_sequences[cluster_id][0]
                     combined_pangenome_clusters_First_Second_clustered.update({KEY: VALUE})
+
             cluster_id = line.strip('>')
             cluster_id = cluster_id.strip('\n')
             cluster_id = cluster_id.split(' ')[1]
@@ -233,55 +337,40 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences
 
 
-def cluster_EdgeList(options,splitter):
-    if options.cluster_format == 'TSV':
-        separator = '\t'
-    elif options.cluster_format == 'CSV':
-        separator = ','
-    cluster_id = 0
-    last_rep = ''
-    first = True
-    First_in = open(options.clusters, 'r')
-    pangenome_clusters_First = OrderedDict()
-    pangenome_clusters_First_genomes = OrderedDict()
-    pangenome_clusters_First_sequences = OrderedDict()
-    taxa_dict = defaultdict(int)
-    reps = OrderedDict()
-    tmp_genomes = None
-    for line in First_in:
-        rep, child = line.strip().split(separator)
-        child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
-        # Counting occurrences of genomes
-        taxa_dict[child_taxa] += 1
-        if first == True:
-            pangenome_clusters_First['0'] = []
-            pangenome_clusters_First_sequences['0'] = []
-            first = False
-            tmp_genomes = []
 
-        if rep != last_rep and last_rep != '':
-            pangenome_clusters_First_genomes[rep] = tmp_genomes
-            tmp_genomes = []
-            cluster_id +=1
-            pangenome_clusters_First[str(cluster_id)] = []
-            pangenome_clusters_First_sequences[str(cluster_id)] = []
-            cluster_size = len(pangenome_clusters_First_sequences[str(cluster_id-1)])
-            reps.update({last_rep: [cluster_size, len(pangenome_clusters_First[str(cluster_id-1)])]})
-            pangenome_clusters_First[str(cluster_id)] = []
-            pangenome_clusters_First_sequences[str(cluster_id)] = []
-        if child_taxa not in pangenome_clusters_First[str(cluster_id)]:
-            pangenome_clusters_First[str(cluster_id)].append(child_taxa)
-            tmp_genomes.append(child_taxa)
+# def cluster_BLAST(options, splitter):
+#     separator = '\t'
+#     First_in = open(options.clusters, 'r')
+#     pangenome_clusters_First = OrderedDict()
+#     pangenome_clusters_First_genomes = defaultdict(list)
+#     pangenome_clusters_First_sequences = defaultdict(list)
+#     taxa_dict = defaultdict(int)
+#     reps = OrderedDict()
+#
+#     for line in First_in:
+#         elements = line.strip().split(separator)
+#         rep, child = elements[0], elements[1]
+#         child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
+#         # Counting occurrences of genomes
+#         taxa_dict[child_taxa] += 1
+#
+#         if rep not in pangenome_clusters_First:
+#             pangenome_clusters_First[rep] = []
+#             pangenome_clusters_First_sequences[rep] = []
+#
+#         if child_taxa not in pangenome_clusters_First[rep]:
+#             pangenome_clusters_First[rep].append(child_taxa)
+#             pangenome_clusters_First_genomes[rep].append(child_taxa)
+#
+#         pangenome_clusters_First_sequences[rep].append(child)
+#
+#     for rep in pangenome_clusters_First:
+#         cluster_size = len(pangenome_clusters_First_sequences[rep])
+#         reps[rep] = [cluster_size, len(pangenome_clusters_First[rep])]
+#
+#     return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
-        pangenome_clusters_First_sequences[str(cluster_id)].append(child)
-        last_rep = rep
-        cluster_size = len(pangenome_clusters_First_sequences[str(cluster_id)])
-        reps.update({rep: [cluster_size, len(pangenome_clusters_First[str(cluster_id)])]})
 
-    #!!# May not be needed below
-    pangenome_clusters_First_genomes[rep] = tmp_genomes
-
-    return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
 
 def combined_clustering_Edge_List(options, splitter):
@@ -305,7 +394,8 @@ def combined_clustering_Edge_List(options, splitter):
     Combined_reps = OrderedDict()
     first = True
     for line in Second_in:
-        rep, child = line.strip().split(separator)
+        elements = line.strip().split(separator)
+        rep, child = elements[0], elements[1]
         child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
 
         if first == True:

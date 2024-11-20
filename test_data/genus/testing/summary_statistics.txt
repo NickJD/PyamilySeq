@@ -1,9 +1,0 @@
-Genus Groups:
-First_genera_1:	4185
-First_genera_2:	0
-First_genera_3:	0
-First_genera_4:	0
-First_genera_5:	0
-First_genera_6:	0
-First_genera_>:	0
-Total Number of Gene Groups (Including Singletons): 4185

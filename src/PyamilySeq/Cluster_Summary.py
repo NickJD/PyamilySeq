@@ -3,10 +3,10 @@ from collections import OrderedDict
 from collections import defaultdict
 
 try:
-    from .Constants import *
+    from .constants import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
-    from Constants import *
+    from constants import *
     from utils import *
 
 

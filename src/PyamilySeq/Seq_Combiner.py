@@ -2,10 +2,10 @@ import argparse
 
 
 try:
-    from .Constants import *
+    from .constants import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
-    from Constants import *
+    from constants import *
     from utils import *
 
 
@@ -29,7 +29,7 @@ def main():
                           help="Directory for all output files.",
                           required=True)
     required.add_argument("-output_name", action="store", dest="output_file",
-                          help="Output file name.",
+                          help="Output file name (without .fasta).",
                           required=True)
 
     optional = parser.add_argument_group('Optional Arguments')
@@ -38,7 +38,7 @@ def main():
                                ' - Not compatible with "fasta" input mode.',
                           required=False)
     optional.add_argument('-translate', action='store_true', dest='translate', default=None,
-                          help='Default - False: Translate extracted sequences to their AA counterpart?',
+                          help='Default - False: Translate extracted sequences to their AA counterpart? - appends _aa.fasta to given output_name',
                           required=False)
     misc = parser.add_argument_group('Misc Arguments')
     misc.add_argument("-v", "--version", action="version",
@@ -47,14 +47,13 @@ def main():
 
     options = parser.parse_args()
 
-    if options.version:
-        sys.exit(PyamilySeq_Version)
+
 
     output_path = os.path.abspath(options.output_dir)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    combined_out_file = os.path.join(output_path, options.output_file)
+    combined_out_file = os.path.join(output_path, options.output_file + '.fasta')
 
     if options.input_type == 'separate':
         read_separate_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, options.translate)

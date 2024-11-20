@@ -1,32 +1,27 @@
-#from line_profiler_pycharm import profile
-
-import math
 
 try:
-    from .Constants import *
+    from .constants import *
     from .clusterings import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
-    from Constants import *
+    from constants import *
     from clusterings import *
     from utils import *
 
 
-#def output_fasta(options, gene_families):
-
 def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
     output_dir = os.path.abspath(options.output_dir)
-    in_name = options.clusters.split('.')[0].split('/')[-1]
-    gpa_outfile = os.path.join(output_dir, in_name)
-    gpa_outfile = open(gpa_outfile+'_gene_presence_absence.csv','w')
+    #in_name = options.clusters.split('.')[0].split('/')[-1]
+    gpa_outfile = os.path.join(output_dir, 'gene_presence_absence.csv')
+    gpa_outfile = open(gpa_outfile, 'w')
     gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
     gpa_outfile.write('","'.join(genome_dict.keys()))
     gpa_outfile.write('"\n')
     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
         average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
-        gpa_outfile.write('"group_'+str(cluster)+'","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
+        gpa_outfile.write('"group_'+str(cluster)+'","","",'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
                          '","","","","","","","","",""')
 
 
@@ -35,9 +30,9 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
             tmp_list = []
             for value in sequences:
                 if value.split('|')[0] == genome:
-                    tmp_list.append(value)
+                    tmp_list.append(value.split('|')[1])
             if tmp_list:
-                full_out += ',"'+''.join(tmp_list)+'"'
+                full_out += ',"'+'\t'.join(tmp_list)+'"'
             else:
                 full_out = ',""'
             gpa_outfile.write(full_out)
@@ -64,7 +59,7 @@ def get_cores(options,genome_dict):
     cores = OrderedDict()
     prev_top = len(genome_dict)
     first = True
-    for group in options.core_groups.split(','):
+    for group in options.species_groups.split(','):
         calculated_floor = math.floor(int(group) / 100 * len(genome_dict))
         if first == False:
             groups[group] = (calculated_floor,prev_top)
@@ -138,14 +133,16 @@ def cluster(options):
 
     if options.cluster_format == 'CD-HIT':
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '|')
-    elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
-        genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '|')
+    elif 'BLAST' in options.cluster_format:
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_BLAST(options, '|')
+    elif 'MMseqs' in options.cluster_format:
+        genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_MMseqs(options, '|')
 
     ###
     cores, groups = get_cores(options, genome_dict)
     ###
 
-    if options.reclustered != None:
+    if options.reclustered != None: #FIX
         if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genome_dict, '|')
         elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
@@ -169,8 +166,6 @@ def cluster(options):
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
     ############################### Calculate First only
         cluster = str(cluster)
-        if '78' in cluster:
-            pass
         for grouping in numbers[2]: #!!# Could do with a more elegant solution
             current_cluster = grouping[0].split(':')[0]
             if current_cluster not in seen_groupings:
@@ -210,8 +205,10 @@ def cluster(options):
     stats_out = os.path.join(output_path,'summary_statistics.txt')
     key_order = ['First_core_', 'extended_core_', 'combined_core_', 'Second_core_','only_Second_core_']
     with open(stats_out, 'w') as outfile:
+        print("Number of Genomes: " + str(len(genome_dict)))
+        outfile.write("Number of Genomes: " + str(len(genome_dict)) + "\n")
         print("Gene Groups:")
-        outfile.write("Gene Groups:\n")
+        outfile.write("Gene Groups\n")
         for key_prefix in key_order:
             for key, value in cores.items():
                 if key.startswith(key_prefix):
@@ -236,34 +233,59 @@ def cluster(options):
     ###Need to fix this below. If full/partial the ifs need to be different. If full we first need to output the gfs then align. if -wruite-groups not presented then it needs
     # to be done for alignment full anyway...
 
+    genome_list = list(genome_dict.keys())
     if options.run_mode == 'Full':
+        sequences = read_fasta(options.fasta)
         if options.reclustered == None:
             combined_pangenome_clusters_Second_sequences = None
+        ## Output representative sequences
+        representatives_out = os.path.join(output_path,'pan_genome_reference.fa')
+        with open(representatives_out, 'w') as outfile:
+            for cluster, ids in pangenome_clusters_First_sequences.items():
+                outfile.write('>group_'+str(cluster)+'\n')
+                wrapped_aa_seq = wrap_sequence(sequences[ids[0]], 60)
+                outfile.write(wrapped_aa_seq+'\n')
         if options.write_groups != None:
             print("Outputting gene group FASTA files")
-            sequences = read_fasta(options.fasta)
             #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
-            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
-            write_groups(options,output_dir, key_order, cores, sequences,
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
             if options.align_core != None:
                 print("Processing gene group alignment")
-                process_gene_families(options, output_dir, 'concatenated_genes_aligned.fasta')
+                process_gene_groups(options, output_dir, None, None, genome_list, 'core_gene_alignment.aln')
 
     elif options.run_mode == 'Partial':
+        sequences = read_fasta(options.fasta)
         if options.reclustered == None:
             combined_pangenome_clusters_Second_sequences = None
-        if options.write_groups != None and options.fasta != None:
+        # else: ## Output representative sequences - Under development
+        #     representatives_out = os.path.join(output_path, 'pan_genome_reference_reclustered.fa')
+        #     with open(representatives_out, 'w') as outfile:
+        #         for cluster, ids in combined_pangenome_clusters_Second_sequences.items():
+        #             outfile.write('>group_' + str(cluster) + '\n')
+        #             try:
+        #                 wrapped_aa_seq = wrap_sequence(sequences[ids[0]], 60)
+        #             except:
+        #                 print(2)
+        #             outfile.write(wrapped_aa_seq + '\n')
+        ## Output representative sequences
+        representatives_out = os.path.join(output_path,'pan_genome_reference.fa')
+        with open(representatives_out, 'w') as outfile:
+            for cluster, ids in pangenome_clusters_First_sequences.items():
+                outfile.write('>group_'+str(cluster)+'\n')
+                wrapped_aa_seq = wrap_sequence(sequences[ids[0]], 60)
+                outfile.write(wrapped_aa_seq+'\n')
+        if options.write_groups != None:
             print("Outputting gene group FASTA files")
-            sequences = read_fasta(options.fasta)
-            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
-            write_groups(options,output_dir, key_order, cores, sequences,
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
             if options.align_core != None:
                 print("Processing gene group alignment")
-                process_gene_families(options, output_dir, 'concatenated_genes_aligned.fasta')
+                process_gene_groups(options, output_dir, None, None, genome_list, 'core_gene_alignment.aln')
 
 
 

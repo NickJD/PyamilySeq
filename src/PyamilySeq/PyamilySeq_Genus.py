@@ -2,11 +2,11 @@
 
 
 try:
-    from .Constants import *
+    from .constants import *
     from .clusterings import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
-    from Constants import *
+    from constants import *
     from clusterings import *
     from utils import *
 
@@ -14,16 +14,16 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
 def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
     print("Outputting gene_presence_absence file")
     output_dir = os.path.abspath(options.output_dir)
-    in_name = options.clusters.split('.')[0].split('/')[-1]
-    gpa_outfile = os.path.join(output_dir, in_name)
-    gpa_outfile = open(gpa_outfile+'_gene_presence_absence.csv','w')
+    #in_name = options.clusters.split('.')[0].split('/')[-1]
+    gpa_outfile = os.path.join(output_dir, 'gene_presence_absence.csv')
+    gpa_outfile = open(gpa_outfile, 'w')
     gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
     gpa_outfile.write('","'.join(genus_dict.keys()))
     gpa_outfile.write('"\n')
     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
         average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
-        gpa_outfile.write('"group_'+str(cluster)+'","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
+        gpa_outfile.write('"group_'+str(cluster)+'","","",'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
                          '","","","","","","","","",""')
 
 
@@ -183,7 +183,7 @@ def cluster(options):
     key_order = list(cores.keys())
     with open(stats_out,'w') as outfile:
         print("Genus Groups:")
-        outfile.write("Genus Groups:\n")
+        outfile.write("Genus Groups\n")
         for key in key_order:
             print(key+':\t'+str(len(cores[key])))
             outfile.write(key + ':\t' + str(len(cores[key]))+'\n')
@@ -209,8 +209,8 @@ def cluster(options):
             print("Outputting gene group FASTA files")
             sequences = read_fasta(options.fasta)
             #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
-            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
-            write_groups(options,output_dir, key_order, cores, sequences,
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
     elif options.run_mode == 'Partial':
@@ -220,8 +220,8 @@ def cluster(options):
             print("Outputting gene group FASTA files")
             sequences = read_fasta(options.fasta)
             #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
-            output_dir = os.path.join(options.output_dir, 'Gene_Families_Output')
-            write_groups(options,output_dir, key_order, cores, sequences,
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
 

@@ -5,8 +5,8 @@ import glob
 import collections
 from tempfile import NamedTemporaryFile
 import sys
-from line_profiler_pycharm import profile
 import re
+import math
 
 ####
 # Placeholder for the distance function
@@ -44,7 +44,7 @@ except (ModuleNotFoundError, ImportError):
 #####
 
 ################### We are currently fixed using Table 11
-gencode = {
+codon_table = {
       'ATA':'I', 'ATC':'I', 'ATT':'I', 'ATG':'M',
       'ACA':'T', 'ACC':'T', 'ACG':'T', 'ACT':'T',
       'AAC':'N', 'AAT':'N', 'AAA':'K', 'AAG':'K',
@@ -63,10 +63,44 @@ gencode = {
       'TGC':'C', 'TGT':'C', 'TGA':'*', 'TGG':'W'}
 
 def translate_frame(sequence):
-    translate = ''.join([gencode.get(sequence[3 * i:3 * i + 3], 'X') for i in range(len(sequence) // 3)])
+    translate = ''.join([codon_table.get(sequence[3 * i:3 * i + 3], 'X') for i in range(len(sequence) // 3)])
     return translate
 
+def translate_dna_to_aa(dna_fasta, aa_fasta):
+    def translate_dna_sequence(dna_seq):
+        aa_seq = ""
+        for i in range(0, len(dna_seq) - 2, 3):
+            codon = dna_seq[i:i+3]
+            aa_seq += codon_table.get(codon, 'X')  # 'X' for unknown codons
+        return aa_seq
 
+    with open(dna_fasta, 'r') as infile, open(aa_fasta, 'w') as outfile:
+        dna_seq = ""
+        header = ""
+        for line in infile:
+            if line.startswith('>'):
+                if dna_seq:
+                    aa_seq = translate_dna_sequence(dna_seq)
+                    wrapped_aa_seq = wrap_sequence(aa_seq, 60)
+                    outfile.write(f"{header}\n{wrapped_aa_seq}\n")
+                header = line.strip()
+                dna_seq = ""
+            else:
+                dna_seq += line.strip()
+        if dna_seq:
+            aa_seq = translate_dna_sequence(dna_seq)
+            wrapped_aa_seq = wrap_sequence(aa_seq, 60)
+            outfile.write(f"{header}\n{wrapped_aa_seq}\n")
+
+
+def detect_sequence_type(fasta_file):
+    with open(fasta_file, 'r') as f:
+        for line in f:
+            if line.startswith('>'):
+                continue
+            if any(base in line for base in 'EFILPQZ'):
+                return False  # Contains amino acids
+    return True  # Contains DNA
 
 
 def is_tool_installed(tool_name):
@@ -113,6 +147,16 @@ def wrap_sequence(sequence, width=60):
     return "\n".join(wrapped_sequence)
 
 
+def read_genomes_from_fasta(fasta_file):
+    genomes = set()
+    with open(fasta_file, 'r') as file:
+        for line in file:
+            line = line.strip()
+            if line.startswith('>'):
+                genome = line.split('|')[1]
+                genomes.add(genome)
+    return list(genomes)
+
 def read_fasta(fasta_file):
     sequences = {}
     current_sequence = None
@@ -138,11 +182,14 @@ def sort_keys_by_values(dict1, dict2):
     sorted_keys = sorted(dict1.keys(), key=lambda k: custom_sort_key(k, dict1, dict2), reverse=True)
     return sorted_keys
 
-def select_longest_gene(sequences):
+def select_longest_gene(sequences, subgrouped):
     """Select the longest sequence for each genome."""
     longest_sequences = {}
     for seq_id, sequence in sequences.items():
-        genome = seq_id.split('|')[0]  # Assuming genome name can be derived from the sequence ID
+        if subgrouped == False:
+            genome = seq_id.split('|')[0]  # Assuming genome name can be derived from the sequence ID
+        elif subgrouped == True:
+            genome = seq_id.split('|')[1]
         if genome not in longest_sequences or len(sequence) > len(longest_sequences[genome][1]):
             longest_sequences[genome] = (seq_id, sequence)
     return longest_sequences
@@ -182,7 +229,7 @@ def run_mafft_on_sequences(options, sequences, output_file):
 
 
 def read_separate_files(input_dir, name_split, gene_ident, combined_out, translate):
-    with open(combined_out, 'w') as combined_out_file:
+    with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
         for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
             genome_name = os.path.basename(gff_file).split(name_split)[0]
             corresponding_fasta_file = os.path.splitext(gff_file)[0] + '.fa'
@@ -227,20 +274,27 @@ def read_separate_files(input_dir, name_split, gene_ident, combined_out, transla
                     if contig in fasta_dict:
                         if strand == '+':
                             full_sequence = fasta_dict[contig][0]
-                            cds_sequence = full_sequence[start - 1:end]
+                            seq = full_sequence[start - 1:end]
                         elif strand == '-':
                             corrected_start = max(len(fasta_dict[contig][0]) - int(end), 1)
                             corrected_stop = max(len(fasta_dict[contig][0]) - int(start - 1), 1)
                             full_sequence = fasta_dict[contig][1]
-                            cds_sequence = full_sequence[corrected_start:corrected_stop]
+                            seq = full_sequence[corrected_start:corrected_stop]
+
                         if translate == True:
-                            cds_sequence = translate_frame(cds_sequence)
-                        wrapped_sequence = '\n'.join([cds_sequence[i:i + 60] for i in range(0, len(cds_sequence), 60)])
+                            seq_aa = translate_frame(seq)
+                            wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
+                            combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
+                        wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
                         combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+
+    if translate == False:
+        #Clean up unused file
+        os.remove(combined_out_file_aa.name)
 
 
 def read_combined_files(input_dir, name_split, gene_ident, combined_out, translate):
-    with open(combined_out, 'w') as combined_out_file:
+    with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
         for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
             genome_name = os.path.basename(gff_file).split(name_split)[0]
             fasta_dict = collections.defaultdict(str)
@@ -284,21 +338,28 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
                         if contig in fasta_dict:
                             if strand == '+':
                                 full_sequence = fasta_dict[contig][0]
-                                cds_sequence = full_sequence[start - 1:end]
+                                seq = full_sequence[start - 1:end]
                             elif strand == '-':
                                 corrected_start = max(len(fasta_dict[contig][0]) - int(end), 1)
                                 corrected_stop = max(len(fasta_dict[contig][0]) - int(start - 1), 1)
                                 full_sequence = fasta_dict[contig][1]
-                                cds_sequence = full_sequence[corrected_start:corrected_stop]
+                                seq = full_sequence[corrected_start:corrected_stop]
 
                             if translate == True:
-                                cds_sequence = translate_frame(cds_sequence)
-                            wrapped_sequence = '\n'.join([cds_sequence[i:i + 60] for i in range(0, len(cds_sequence), 60)])
+                                seq_aa = translate_frame(seq)
+                                wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
+                                combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
+                            wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
                             combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+
+    if translate == False:
+        #Clean up unused file
+        os.remove(combined_out_file_aa.name)
+
 
 
 def read_fasta_files(input_dir, name_split, combined_out, translate):
-    with open(combined_out, 'w') as combined_out_file:
+    with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
         for fasta_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
             genome_name = os.path.basename(fasta_file).split(name_split)[0]
             fasta_dict = collections.defaultdict(str)
@@ -310,14 +371,19 @@ def read_fasta_files(input_dir, name_split, combined_out, translate):
                         fasta_dict[current_seq] = ''
                     else:
                         fasta_dict[current_seq] +=line.strip()
-                for id, seq in fasta_dict.items():
+                for seq_id, seq in fasta_dict.items():
                     if translate == True:
-                        seq = translate_frame(seq)
+                        seq_aa = translate_frame(seq)
+                        wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
+                        combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
                     wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                    combined_out_file.write(f">{genome_name}|{id}\n{wrapped_sequence}\n")
+                    combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
+    if translate == False:
+        #Clean up unused file
+        os.remove(combined_out_file_aa)
 
-def write_groups(options, output_dir, key_order, cores, sequences,
+def write_groups_func(options, output_dir, key_order, cores, sequences,
                  pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences):
     """
     Writes individual FASTA files and a combined FASTA file for all sequences.
@@ -335,70 +401,161 @@ def write_groups(options, output_dir, key_order, cores, sequences,
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    combined_fasta_filename = os.path.join(output_dir, "combined_group_sequences.fasta")
+    combined_fasta_filename = os.path.join(output_dir, "combined_group_sequences_dna.fasta")
 
     # Open combined FASTA file for writing all sequences
-    with open(combined_fasta_filename, 'w') as combined_fasta:
+    with open(combined_fasta_filename, 'w') as combined_fasta, open(combined_fasta_filename.replace('_dna.fasta','_aa.fasta'), 'w') as combined_fasta_aa:
         for key_prefix in key_order:
             for key, values in cores.items():
                 if any(part in options.write_groups.split(',') for part in key.split('_')):
                     if key.startswith(key_prefix):
                         for value in values:
-                            output_filename = f"{key}_{value}.fasta"
+                            output_filename = f"{key}_{value}_dna.fasta"
                             if 'First' in key_prefix:
                                 sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
                             else:
                                 sequences_to_write = combined_pangenome_clusters_Second_sequences[value]
 
                             # Write individual FASTA file
-                            with open(os.path.join(output_dir, output_filename), 'w') as outfile:
+                            with open(os.path.join(output_dir,output_filename), 'w') as outfile, open(os.path.join(output_dir, output_filename.replace('_dna.fasta','_aa.fasta')), 'w') as outfile_aa:
                                 for header in sequences_to_write:
                                     if header in sequences:
                                         sequence = sequences[header]
-                                        outfile.write(f">{header}\n")
                                         wrapped_sequence = wrap_sequence(sequence)
-                                        outfile.write(f"{wrapped_sequence}\n")
-
-                                        # Also write to the combined FASTA file
+                                        # Handle Amino Acid Sequences (AA)
+                                        if options.sequence_type == 'AA':
+                                            seq_aa = translate_frame(sequence)
+                                            wrapped_sequence_aa = wrap_sequence(seq_aa)
+                                            # Write individual group file for AA, if option is enabled
+                                            if options.write_individual_groups:
+                                                outfile_aa.write(f">{header}\n")
+                                                outfile_aa.write(f"{wrapped_sequence_aa}\n")
+                                            else:
+                                                os.remove(outfile_aa.name)  # Delete individual file if option is disabled
+                                            # Always write to the combined AA file
+                                            combined_fasta_aa.write(f">Group_{value}|{header}\n")
+                                            combined_fasta_aa.write(f"{wrapped_sequence_aa}\n")
+                                        # Handle Nucleotide Sequences
+                                        else:
+                                            # If the option is disabled, delete individual AA file (if created)
+                                            try:
+                                                os.remove(outfile_aa.name)  # Ensure outfile_aa is removed when sequence_type isn't 'AA'
+                                            except FileNotFoundError:
+                                                pass
+                                        # Write individual group file for nucleotide sequence, if option is enabled
+                                        if options.write_individual_groups:
+                                            outfile.write(f">{header}\n")
+                                            outfile.write(f"{wrapped_sequence}\n")
+                                        else:
+                                            os.remove(outfile.name)  # Delete individual file if option is disabled
+                                        # Always write to the combined nucleotide file
                                         combined_fasta.write(f">Group_{value}|{header}\n")
                                         combined_fasta.write(f"{wrapped_sequence}\n")
-                                    else:
-                                        if options.verbose:
-                                            print(f"Sequence {header} not found in original_fasta file.")
 
+                                    else:
+                                        if options.verbose == True:
+                                            print(f"Sequence {header} not found in original_fasta file.")
+    if options.sequence_type != 'AA':
+        #Clean up unused file
+        os.remove(combined_fasta_aa.name)
     print(f"Combined FASTA file saved to: {combined_fasta_filename}")
 
 
-def process_gene_families(options, directory, output_file):
+# def process_gene_groups(options, group_directory, sub_group_directory, paralog_groups, output_file):
+#     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
+#     concatenated_sequences = {}
+#     output_file = group_directory.replace('Gene_Groups_Output',output_file)
+#
+#     # Iterate over each gene family file
+#     for gene_file in os.listdir(group_directory):
+#         if gene_file.endswith('.fasta') and not gene_file.endswith('combined_group_sequences.fasta') :
+#             gene_path = os.path.join(group_directory, gene_file)
+#
+#             # Read sequences from the gene family file
+#             sequences = read_fasta(gene_path)
+#
+#             # Select the longest sequence for each genome
+#             longest_sequences = select_longest_gene(sequences)
+#
+#             # Run mafft on the longest sequences
+#             aligned_file = f"{group_directory}/{gene_file}_aligned.fasta.tmp"
+#             run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
+#
+#             # Read aligned sequences and concatenate them
+#             aligned_sequences = read_fasta(aligned_file)
+#             for genome, aligned_seq in aligned_sequences.items():
+#                 genome_name = genome.split('|')[0]
+#                 if genome_name not in concatenated_sequences:
+#                     concatenated_sequences[genome_name] = ""
+#                 concatenated_sequences[genome_name] += aligned_seq
+#
+#             # Clean up aligned file
+#             os.remove(aligned_file)
+#
+#     # Write the concatenated sequences to the output file
+#     with open(output_file, 'w') as out:
+#         for genome, sequence in concatenated_sequences.items():
+#             out.write(f">{genome}\n")
+#             wrapped_sequence = wrap_sequence(sequence, 60)
+#             out.write(f"{wrapped_sequence}\n")
+
+def perform_alignment(gene_path,group_directory, gene_file, options, concatenated_sequences, subgrouped):
+    # Read sequences from the gene family file
+    sequences = read_fasta(gene_path)
+
+    # Select the longest sequence for each genome
+    longest_sequences = select_longest_gene(sequences, subgrouped)
+
+    # Run mafft on the longest sequences
+    aligned_file = f"{group_directory}/{gene_file}_aligned.fasta.tmp"
+    run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
+
+    # Read aligned sequences and concatenate them
+    aligned_sequences = read_fasta(aligned_file)
+    # Find the length of the longest sequence in aligned_sequences
+    max_length = max(len(seq) for seq in aligned_sequences.values())
+
+    for genome, sequence in concatenated_sequences.items():
+        if any(genome in key for key in aligned_sequences.keys()):
+            genome_name_in_aligned = next(key for key in aligned_sequences.keys() if genome in key)#.split('|')[split_by]
+            concatenated_sequences[genome] += aligned_sequences[genome_name_in_aligned]
+        else:
+            concatenated_sequences[genome] += "-" * max_length
+
+    # Clean up aligned file
+    os.remove(aligned_file)
+
+    return concatenated_sequences
+
+def process_gene_groups(options, group_directory, sub_group_directory, paralog_groups, genome_list, output_file):
     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
-    concatenated_sequences = {}
-    output_file = directory.replace('Gene_Families_Output',output_file)
+    concatenated_sequences = {genome: "" for genome in genome_list}
+    output_file = group_directory.replace('Gene_Groups_Output', output_file)
+    if paralog_groups != None:
+        threshold_size = math.floor(int(options.align_core) * int(options.genome_num) / 100)
+
+    if options.align_aa == True:
+        affix = '_aa.fasta'
+    else:
+        affix = '_dna.fasta'
 
     # Iterate over each gene family file
-    for gene_file in os.listdir(directory):
-        if gene_file.endswith('.fasta') and not gene_file.endswith('combined_group_sequences.fasta'):
-            gene_path = os.path.join(directory, gene_file)
+    for gene_file in os.listdir(group_directory):
+        if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
+            #print(gene_file)
+            current_group = int(gene_file.split('_')[3].split('.')[0])
+            gene_path = os.path.join(group_directory, gene_file)
 
-            # Read sequences from the gene family file
-            sequences = read_fasta(gene_path)
+            # Check for matching group in paralog_groups
+            if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
+                for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
+                    if size >= threshold_size:
+                        gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
+                        concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
 
-            # Select the longest sequence for each genome
-            longest_sequences = select_longest_gene(sequences)
+            else:
+                concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
 
-            # Run mafft on the longest sequences
-            aligned_file = f"{directory}/{gene_file}_aligned.fasta.tmp"
-            run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
-
-            # Read aligned sequences and concatenate them
-            aligned_sequences = read_fasta(aligned_file)
-            for genome, aligned_seq in aligned_sequences.items():
-                genome_name = genome.split('|')[0]
-                if genome_name not in concatenated_sequences:
-                    concatenated_sequences[genome_name] = ""
-                concatenated_sequences[genome_name] += aligned_seq
-
-            # Clean up aligned file
-            os.remove(aligned_file)
 
     # Write the concatenated sequences to the output file
     with open(output_file, 'w') as out:
@@ -406,3 +563,4 @@ def process_gene_families(options, directory, output_file):
             out.write(f">{genome}\n")
             wrapped_sequence = wrap_sequence(sequence, 60)
             out.write(f"{wrapped_sequence}\n")
+

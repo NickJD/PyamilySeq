@@ -1,20 +1,15 @@
 import argparse
-import collections
-import os
-import glob
-import subprocess
-
 
 
 try:
     from .PyamilySeq_Species import cluster as species_cluster
     from .PyamilySeq_Genus import cluster as genus_cluster
-    from .Constants import *
+    from .constants import *
     from .utils import *
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from PyamilySeq_Species import cluster as species_cluster
     from PyamilySeq_Genus import cluster as genus_cluster
-    from Constants import *
+    from constants import *
     from utils import *
 
 
@@ -28,150 +23,139 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-c', str(options.pident),
         '-s', str(options.len_diff),
         '-T', str(options.threads),
-        '-M', str(options.clustering_memory),
+        '-M', str(options.mem),
         '-d', "0",
-        '-g', "1",
+        '-g', str(options.fast_mode),
         '-sc', "1",
         '-sf', "1"
     ]
-    if options.verbose != None:
+    if options.verbose == True:
         subprocess.run(cdhit_command)
     else:
         subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': A tool that groups genes into unique clusters.')
-    ### Required Arguments
-    required = parser.add_argument_group('Required Parameters')
-    required.add_argument('-run_mode', action='store', dest='run_mode', choices=['Full','Partial'],
-                          help='Run Mode: Should PyamilySeq be run in "Full" or "Partial" mode?',
-                          required=True)
-    required.add_argument('-group_mode', action='store', dest='group_type', choices=['Species', 'Genus'],
-                          help='Group Mode: Should PyamilySeq be run in "Species" or "Genus" mode? ',
-                          required=True)
-    required.add_argument("-clustering_format", action="store", dest="clustering_format", choices=['CD-HIT','TSV','CSV'],
-                          help="Clustering format to use: CD-HIT or TSV (MMseqs2, BLAST, DIAMOND) / CSV edge-list file (Node1\tNode2).",
-                          required=True)
-    required.add_argument("-output_dir", action="store", dest="output_dir",
-                          help="Directory for all output files.",
-                          required=True)
-    ### Full-Mode Arguments
-    full_mode_args = parser.add_argument_group('Full-Mode Parameters - Required when "-run_mode Full" is used')
-    full_mode_args.add_argument("-input_type", action="store", dest="input_type", choices=['separate', 'combined'],
-                          help="Type of input files: 'separate' for separate FASTA and GFF files,"
-                             " 'combined' for GFF files with embedded FASTA sequences.",
-                          required=False)
-    full_mode_args.add_argument("-input_dir", action="store", dest="input_dir",
-                          help="Directory containing GFF/FASTA files.",
-                          required=False)
-    full_mode_args.add_argument("-name_split", action="store", dest="name_split",
-                          help="substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').",
-                          required=False)
-    full_mode_args.add_argument('-sequence_type', action='store', dest='sequence_type', default='DNA',choices=['AA', 'DNA'],
-                          help='Default - DNA: Should clustering be performed in "DNA" or "AA" mode?',
-                          required=False)
-    full_mode_args.add_argument('-gene_ident', action='store', dest='gene_ident', default='CDS',
-                          help='Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo"',
-                          required=False)
-    full_mode_args.add_argument("-pid", action="store", dest="pident", type=float, default=0.95,
-                          help="Default 0.95: Pident threshold for clustering.",
-                          required=False)
-    full_mode_args.add_argument("-len_diff", action="store", dest="len_diff", type=float, default=0.80,
-                          help="Default 0.80: Minimum length difference between clustered sequences - (-s) threshold for CD-HIT clustering.",
-                          required=False)
-    ###Clustering Arguments
-    clustering_args = parser.add_argument_group('Clustering Runtime Arguments - Optional when "-run_mode Full" is used')
-    clustering_args.add_argument("-mem", action="store", dest="clustering_memory", type=int, default=4000,
-                          help="Default 4000: Memory to be allocated for clustering (in MBs).",
-                          required=False)
-    clustering_args.add_argument("-t", action="store", dest="threads", type=int, default=8,
-                          help="Default 8: Threads to be allocated for clustering and/or alignment.",
-                          required=False)
+    parser = argparse.ArgumentParser(description=f"PyamilySeq {PyamilySeq_Version}: A tool for gene clustering and analysis.")
 
-    ###Partial-Mode Arguments
-    partial_mode_args = parser.add_argument_group("Partial-Mode Parameters - Required when '-run_mode Partial' is used")
-    partial_mode_args.add_argument("-cluster_file", action="store", dest="cluster_file",
-                        help="Clustering output file containing CD-HIT, TSV or CSV Edge List",
-                        required=False)
+    # Add subparsers for Full and Partial modes
+    subparsers = parser.add_subparsers(dest="run_mode", required=True, help="Choose a mode: 'Full' or 'Partial'.")
 
-    ###Grouping Arguments
-    grouping_args = parser.add_argument_group('Grouping Parameters - Use to fine-tune grouping of genes after clustering')
-    grouping_args.add_argument('-reclustered', action='store', dest='reclustered',
-                        help='Currently only works on Partial Mode: Clustering output file from secondary round of clustering.',
-                        required=False)
-    grouping_args.add_argument('-seq_tag', action='store', dest='sequence_tag', default='StORF',
-                        help='Default - "StORF": Unique identifier to be used to distinguish the second of two rounds of clustered sequences',
-                        required=False)
-    grouping_args.add_argument('-core_groups', action="store", dest='core_groups', default="99,95,15",
-                        help='Default - (\'99,95,15\'): Gene family groups to use for "Species" mode',
-                        required=False)
-
-    grouping_args.add_argument('-genus_groups', action="store", dest='genus_groups', default="1,2,3,4,5,6",
-                        help='Default - (\'1,2,3,4,5,6\'): Gene family groups to use for "Genus" mode',
-                        required=False)
-
-    ###Output Arguments
-    output_args = parser.add_argument_group('Output Parameters')
-    output_args.add_argument('-w', action="store", dest='write_groups', default=None,
-                          help='Default - No output: Output sequences of identified groups (provide levels at which to output - Species "-w 99,95" Genus "-w 2,3"'
-                               ' - Must provide FASTA file with -original_fasta if in Partial run mode.',
-                          required=False)
-    output_args.add_argument('-a', action="store_true", dest='align_core', default=None,
-                          help='Default - No output: SLOW! (Only works for Species mode) Output aligned and concatinated sequences of identified groups -'
-                               'provide group levels at which to output "-w 99,95" - Must provide FASTA file with -original_fasta in Partial'
-                               'run mode.',
-                          required=False)
-    output_args.add_argument('-original_fasta', action='store', dest='original_fasta',
-                          help='FASTA file to use in conjunction with "-w" or "-con" when running in Partial Mode.',
-                          required=False)
-    output_args.add_argument('-no_gpa', action='store_false', dest='gene_presence_absence_out',
-                          help='Do not create a Roary/Panaroo formatted gene_presence_absence.csv (created by default) - Required for Coinfinder and other downstream tools',
-                          required=False)
-
-    ### Misc Arguments
-    misc = parser.add_argument_group("Misc Parameters")
-    misc.add_argument("-verbose", action="store_true", dest="verbose",
-                      help="Print verbose output.",
-                      required=False)
-    misc.add_argument("-v", "--version", action="version",
-                      version=f"PyamilySeq version {PyamilySeq_Version} - Exiting",
-                      help="Print out version number and exit")
+    # Full Mode Subparser
+    full_parser = subparsers.add_parser("Full",
+                                        help="Full mode: PyamilySeq to cluster with CD-HIT and process output.")
+    #full_parser.add_argument("-clustering_format", choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
+    #                         help="Clustering format to use: CD-HIT, MMseqs2, or BLAST.")
+    full_parser.add_argument("-output_dir", required=True,
+                             help="Directory for all output files.")
+    full_parser.add_argument("-input_type", choices=['separate', 'combined', 'fasta'], required=True,
+                             help="Type of input files: 'separate' for matching FASTA and GFF files, 'combined' for GFF+FASTA, or 'fasta' for a prepared FASTA file.")
+    full_parser.add_argument("-input_dir", required=False,
+                             help="Directory containing GFF/FASTA files - Use with -input_type separate/combined.")
+    full_parser.add_argument("-input_fasta", required=False,
+                             help="Input FASTA file - Use with - input_type fasta.")
+    full_parser.add_argument("-name_split", required=False,
+                             help="Substring to split filenames and extract genome names (e.g., '_combined.gff3') - Use with -input_type separate/combined.")
+    full_parser.add_argument("-sequence_type", choices=['AA', 'DNA'], default="AA", required=False,
+                             help="Clustering mode: 'DNA' or 'AA'.")
+    full_parser.add_argument("-gene_ident", default="CDS", required=False,
+                             help="Gene identifiers to extract sequences (e.g., 'CDS, tRNA').")
+    full_parser.add_argument("-c", type=float, dest="pident", default=0.90, required=False,
+                             help="Sequence identity threshold for clustering (default: 0.90) - CD-HIT parameter '-c'.")
+    full_parser.add_argument("-s", type=float, dest="len_diff", default=0.80, required=False,
+                             help="Length difference threshold for clustering (default: 0.80) - CD-HIT parameter '-s'.")
+    full_parser.add_argument("-fast_mode", action="store_true", required=False,
+                             help="Enable fast mode for CD-HIT (not recommended) - CD-HIT parameter '-g'.")
 
 
+    # Partial Mode Subparser
+    partial_parser = subparsers.add_parser("Partial", help="Partial mode: PyamilySeq to process pre-clustered data.")
+    partial_parser.add_argument("-clustering_format", choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
+                                help="Clustering format used: CD-HIT, MMseqs2, or BLAST.")
+    partial_parser.add_argument("-cluster_file", required=True,
+                                help="Cluster file containing pre-clustered groups from CD-HIT, MMseqs, BLAST etc.")
+    partial_parser.add_argument("-original_fasta", required=True,
+                                help="FASTA file used in pre-clustering (Provide sequences in DNA form).")
+    partial_parser.add_argument("-output_dir", required=True,
+                                help="Directory for all output files.")
+    partial_parser.add_argument("-reclustered", required=False,
+                                help="Clustering output file from a second round of clustering.")
+    partial_parser.add_argument("-seq_tag", default="StORF", dest="sequence_tag", required=False,
+                                help="Tag for distinguishing reclustered sequences.")
+
+    # Common Grouping Arguments
+    for subparser in [full_parser, partial_parser]:
+        subparser.add_argument("-group_mode", choices=['Species', 'Genus'], default="Species", required=False,
+                               help="Grouping mode: 'Species' or 'Genus'.")
+        subparser.add_argument("-species_groups", default="99,95,15", required=False,
+                               help="Gene groupings for 'Species' mode (default: '99,95,15').")
+        subparser.add_argument("-genus_groups", default="1,2,3,4,5,6,7,8,9,10", required=False,
+                               help="Gene groupings for 'Genus' mode (default: '1-10').")
+        subparser.add_argument("-w", default=None, dest="write_groups", required=False,
+                               help="Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95').")
+        subparser.add_argument("-wi", action="store_true", dest="write_individual_groups", required=False,
+                               help="Output individual FASTA files for each group.")
+        subparser.add_argument("-a", action="store_true", dest="align_core", required=False,
+                               help="Align and concatenate sequences for 'core' groups.")
+        subparser.add_argument("-align_aa", action="store_true", required=False,
+                               help="Align sequences as amino acids.")
+        subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out", required=False,
+                               help="Skip creation of gene_presence_absence.csv.")
+        subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
+                                 help="Memory allocation for clustering (MB) - CD-HIT parameter '-M'.")
+        subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
+                                 help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
+
+        # Miscellaneous Arguments
+        subparser.add_argument("-verbose", action="store_true", required=False,
+                            help="Print verbose output.")
+        subparser.add_argument("-v", "--version", action="version",
+                            version=f"PyamilySeq {PyamilySeq_Version}: Exiting.", help="Print version number and exit.")
+
+    # Parse Arguments
     options = parser.parse_args()
-    print("Running PyamilySeq: " + PyamilySeq_Version)
+
+    # Example of conditional logic based on selected mode
+    print(f"Running PyamilySeq {PyamilySeq_Version} in {options.run_mode} mode:")
+    if options.run_mode == "Full" and options.verbose == True:
+        print("Processing Full mode with options:", vars(options))
+    elif options.run_mode == "Partial" and options.verbose == True:
+        print("Processing Partial mode with options:", vars(options))
 
     ### Checking all required parameters are provided by user #!!# Doesn't seem to work
     if options.run_mode == 'Full':
-        if options.reclustered != None:
+        options.clustering_format = 'CD-HIT'
+        if getattr(options, 'reclustered', None) is not None:
             sys.exit("Currently reclustering only works on Partial Mode.")
-        required_full_mode = [options.input_type, options.input_dir, options.name_split, options.clustering_format,
-                              options.pident, options.len_diff]
+        required_full_mode = [options.input_type, options.pident, options.len_diff]
+        if options.input_type != 'fasta':
+            required_full_mode.extend([options.input_dir, options.name_split])
         if all(required_full_mode):
             # Proceed with the Full mode
             pass
         else:
             missing_options = [opt for opt in
                                ['input_type', 'input_dir', 'name_split', 'clustering_format', 'pident', 'len_diff'] if
-                               not options.__dict__[opt]]
-            print(f"Missing required options for Full mode: {', '.join(missing_options)}")
-        if options.align_core != None:
+                               not options.__dict__.get(opt)]
+            sys.exit(f"Missing required options for Full mode: {', '.join(missing_options)}")
+        if options.align_core:
+            options.write_individual_groups = True
             if options.write_groups == None:
                 sys.exit('Must provide "-w" to output gene groups before alignment "-a" can be done.')
     elif options.run_mode == 'Partial':
-        required_partial_mode = [options.cluster_file, ]
+        required_partial_mode = [options.cluster_file, options.original_fasta]
         if all(required_partial_mode):
             # Proceed with the Partial mode
             pass
         else:
             missing_options = [opt for opt in
-                               ['cluster_file',] if
+                               ['cluster_file','original_fasta'] if
                                not options.__dict__[opt]]
-            print(f"Missing required options for Partial mode: {', '.join(missing_options)}")
-        if options.align_core != None:
+            sys.exit(f"Missing required options for Partial mode: {', '.join(missing_options)}")
+        if options.align_core:
+            options.write_individual_groups = True
             if options.write_groups == None or options.original_fasta == None:
-                sys.exit('Must provide "-w" and "-original_fasta" to output gene groups before alignment "-a" can be done.')
+                sys.exit('Must provide "-w" to output gene groups before alignment "-a" can be done.')
 
     if options.clustering_format == 'CD-HIT':
         clust_affix = '.clstr'
@@ -180,48 +164,55 @@ def main():
     elif options.clustering_format == 'CSV':
         clust_affix = '.csv'
 
-
-
-
     ###External tool checks:
     ##MAFFT
     if options.align_core == True:
         if is_tool_installed('mafft'):
-            if options.verbose != None:
+            if options.verbose == True:
                 print("mafft is installed. Proceeding with alignment.")
         else:
             exit("mafft is not installed. Please install mafft to proceed.")
     ##CD-HIT
-    if options.clustering_format == 'CD-HIT' and options.run_mode == 'Full':
+    if options.run_mode == 'Full':
         if is_tool_installed('cd-hit'):
-            if options.verbose != None:
+            if options.verbose == True:
                 print("cd-hit is installed. Proceeding with clustering.")
+            if options.sequence_type == 'DNA':
+                clustering_mode = 'cd-hit-est'
+            elif options.sequence_type == 'AA':
+                clustering_mode = 'cd-hit'
+            if options.fast_mode == True:
+                options.fast_mode = 0
+                if options.verbose == True:
+                    print("Running CD-HIT in fast mode.")
+            else:
+                options.fast_mode = 1
+                if options.verbose == True:
+                    print("Running CD-HIT in slow mode.")
         else:
             exit("cd-hit is not installed. Please install cd-hit to proceed.")
 
-    if options.write_groups != None and options.original_fasta == False:
-        exit("-fasta must br provided if -w is used")
 
+    # if options.write_groups != None and options.original_fasta == False:
+    #     exit("-fasta must br provided if -w is used")
 
-
-
-    if options.cluster_file:
+    if hasattr(options, 'cluster_file') and options.cluster_file:
         options.cluster_file = fix_path(options.cluster_file)
-    if options.reclustered:
+    if hasattr(options, 'reclustered') and options.reclustered:
         options.reclustered = fix_path(options.reclustered)
-    if options.input_dir:
+    if hasattr(options, 'input_dir') and options.input_dir:
         options.input_dir = fix_path(options.input_dir)
-    if options.output_dir:
+    if hasattr(options, 'output_dir') and options.output_dir:
         options.output_dir = fix_path(options.output_dir)
 
     output_path = os.path.abspath(options.output_dir)
-    combined_out_file = os.path.join(output_path, "combined_sequences.fasta")
+    combined_out_file = os.path.join(output_path, "combined_sequences_dna.fasta")
     clustering_output = os.path.join(output_path, 'clustering_' + options.clustering_format)
 
-    if options.group_type == 'Species':
-        options.core_groups = options.core_groups + ',0'
-        groups_to_use = options.core_groups
-    elif options.group_type == 'Genus':
+    if options.group_mode == 'Species':
+        options.species_groups = options.species_groups + ',0'
+        groups_to_use = options.species_groups
+    elif options.group_mode == 'Genus':
         options.genus_groups = options.genus_groups + ',>'
         groups_to_use = options.genus_groups
         if options.align_core != None:
@@ -229,36 +220,56 @@ def main():
 
 
     if options.run_mode == 'Full':
+        if options.clustering_format != 'CD-HIT':
+            sys.exit('Only CD-HIT clsutering works in Full Mode')
+
         if not os.path.exists(output_path):
             os.makedirs(output_path)
         if options.sequence_type == 'AA':
             clustering_mode = 'cd-hit'
+            file_to_cluster = combined_out_file.replace('_dna.fasta','_aa.fasta')
             translate = True
         elif options.sequence_type == 'DNA':
             clustering_mode = 'cd-hit-est'
             translate = False
+            file_to_cluster = combined_out_file
         if options.input_type == 'separate':
             read_separate_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, translate)
-        else:
+            run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
+        elif options.input_type == 'combined':
             read_combined_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, translate)
+            run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
+        elif options.input_type == 'fasta':
+            combined_out_file = options.input_fasta
+            ### FIX write code to detect if DNA or AA and if sequence tpye is AA then translate
+            # Detect if the input FASTA file contains DNA or AA sequences
+            is_dna = detect_sequence_type(options.input_fasta)
+            # If the sequence type is AA and the input is DNA, translate the DNA to AA
+            if options.sequence_type == 'AA' and is_dna:
+                translated_fasta = os.path.join(output_path, os.path.splitext(os.path.basename(options.input_fasta))[0] + '_aa.fasta')
+                translate_dna_to_aa(options.input_fasta, translated_fasta)
+                file_to_cluster = translated_fasta
+            else:
+                file_to_cluster = options.input_fasta
+            run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
 
-        if options.clustering_format == 'CD-HIT':
-            run_cd_hit(options, combined_out_file, clustering_output, clustering_mode)
 
         class clustering_options:
             def __init__(self):
                 self.run_mode = options.run_mode
                 self.cluster_format = options.clustering_format
                 self.sequence_type = options.sequence_type
-                self.reclustered = options.reclustered
-                self.sequence_tag = options.sequence_tag
-                self.core_groups = groups_to_use
+                self.reclustered = None
+                self.sequence_tag = None
+                self.species_groups = groups_to_use
                 self.clusters = clustering_output + clust_affix
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_groups = options.write_groups
+                self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.align_core = options.align_core
+                self.align_aa = options.align_aa
                 self.fasta = combined_out_file
                 self.verbose = options.verbose
 
@@ -269,25 +280,34 @@ def main():
             def __init__(self):
                 self.run_mode = options.run_mode
                 self.cluster_format = options.clustering_format
+                self.sequence_type = None
                 self.reclustered = options.reclustered
                 self.sequence_tag = options.sequence_tag
-                self.core_groups = groups_to_use
+                self.species_groups = groups_to_use
                 self.clusters = options.cluster_file
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
                 self.write_groups = options.write_groups
+                self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.align_core = options.align_core
+                self.align_aa = options.align_aa
                 self.fasta = options.original_fasta
                 self.verbose = options.verbose
 
         clustering_options = clustering_options()
 
 
-    if options.group_type == 'Species':
+    if options.group_mode == 'Species':
         species_cluster(clustering_options)
-    elif options.group_type == 'Genus':
+    elif options.group_mode == 'Genus':
         genus_cluster((clustering_options))
+
+
+    # Save arguments to a text file
+    with open(output_path+"/PyamilySeq_params.txt", "w") as outfile:
+        for arg, value in vars(options).items():
+            outfile.write(f"{arg}: {value}\n")
 
     print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
           "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")
