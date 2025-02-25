@@ -21,7 +21,7 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
     gpa_outfile.write('"\n')
     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
         average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
-        gpa_outfile.write('"group_'+str(cluster)+'","","",'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
+        gpa_outfile.write('"group_'+str(cluster)+'","","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
                          '","","","","","","","","",""')
 
 
@@ -32,7 +32,7 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
                 if value.split('|')[0] == genome:
                     tmp_list.append(value.split('|')[1])
             if tmp_list:
-                full_out += ',"'+'\t'.join(tmp_list)+'"'
+                full_out += ',"'+'  '.join(tmp_list)+'"'
             else:
                 full_out = ',""'
             gpa_outfile.write(full_out)

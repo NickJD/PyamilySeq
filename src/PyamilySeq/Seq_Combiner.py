@@ -22,14 +22,17 @@ def main():
                              ' "combined" for GFF files with embedded FASTA sequences and "fasta" for combining multiple '
                                'FASTA files together.',
                           required=True)
-    required.add_argument("-name_split", action="store", dest="name_split",
-                          help="substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').",
-                          required=True)
+    required.add_argument("-name_split_gff", action="store", dest="name_split_gff",
+                          help="Substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff'). - Not needed with -input_type fasta",
+                          required=False)
+    required.add_argument("-name_split_fasta", action="store", dest="name_split_fasta",
+                          help="Substring used to split filenames and extract genome names for fasta files if named differently to paired gff files (e.g., '_dna.fasta').",
+                          required=False)
     required.add_argument("-output_dir", action="store", dest="output_dir",
                           help="Directory for all output files.",
                           required=True)
     required.add_argument("-output_name", action="store", dest="output_file",
-                          help="Output file name (without .fasta).",
+                          help="Output file name.",
                           required=True)
 
     optional = parser.add_argument_group('Optional Arguments')
@@ -48,19 +51,33 @@ def main():
     options = parser.parse_args()
 
 
+    if options.input_type == 'separate' and options.name_split_gff is None:
+        print("Please provide a substring to split the filename and extract the genome name.")
+        exit(1)
+    if options.input_type == 'combined' and options.name_split_gff is None:
+        print("Please provide a substring to split the filename and extract the genome name.")
+        exit(1)
+    if options.input_type == 'fasta' and options.name_split_fasta is None:
+        print("Please provide a substring to split the filename and extract the genome name.")
+        exit
 
     output_path = os.path.abspath(options.output_dir)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    combined_out_file = os.path.join(output_path, options.output_file + '.fasta')
+    output_file = options.output_file + '.fasta'
+    if os.path.exists(os.path.join(output_path, output_file)):
+        print(f"Output file {output_file} already exists in the output directory. Please delete or rename the file and try again.")
+        exit(1)
+
+    combined_out_file = os.path.join(output_path, output_file )
 
     if options.input_type == 'separate':
-        read_separate_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, options.translate)
+        read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, options.translate)
     elif options.input_type == 'combined':
-        read_combined_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, options.translate)
+        read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, options.translate)
     elif options.input_type == 'fasta':
-        read_fasta_files(options.input_dir, options.name_split, combined_out_file, options.translate)
+        read_fasta_files(options.input_dir, options.name_split_fasta, combined_out_file, options.translate)
 
 if __name__ == "__main__":
     main()

@@ -228,15 +228,33 @@ def run_mafft_on_sequences(options, sequences, output_file):
 
 
 
-def read_separate_files(input_dir, name_split, gene_ident, combined_out, translate):
+def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident, combined_out, translate):
+    paired_files_found = None
     with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
-        for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
-            genome_name = os.path.basename(gff_file).split(name_split)[0]
-            corresponding_fasta_file = os.path.splitext(gff_file)[0] + '.fa'
-            if not os.path.exists(corresponding_fasta_file):
-                continue
+        gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff))
+        if not gff_files:
+            sys.exit("Error: No GFF files found.")
+        for gff_file in gff_files:
+            genome_name = os.path.basename(gff_file).split(name_split_gff)[0]
+            if name_split_fasta == None:
+                possible_extensions = ['.fa', '.fasta', '.fna']
+                corresponding_fasta_file = None
+                for ext in possible_extensions:
+                    temp_file = os.path.splitext(gff_file)[0] + ext
+                    if os.path.exists(temp_file):
+                        corresponding_fasta_file = temp_file
+                        break
+                if corresponding_fasta_file is None:
+                    print("Corresponding FASTA file for GFF file '" + gff_file + "' not found. Skipping. - Try using the -name_split_fasta option.")
+                    continue
+            else:
+                corresponding_fasta_file = os.path.join(input_dir, genome_name + name_split_fasta)
+                if not os.path.exists(corresponding_fasta_file):
+                    print("Corresponding FASTA file for GFF file '" + gff_file + "' not found. Skipping. - Try using the -name_split_fasta option.")
+                    continue
 
             gff_features = []
+            paired_files_found = True
             with open(gff_file, 'r') as file:
                 seen_seq_ids = collections.defaultdict(int)
                 lines = file.readlines()
@@ -244,6 +262,7 @@ def read_separate_files(input_dir, name_split, gene_ident, combined_out, transla
                     line_data = line.split('\t')
                     if len(line_data) == 9:
                         if any(gene_type in line_data[2] for gene_type in gene_ident):
+                            seq_id = line_data[8].split('ID=')[1].split(';')[0]
                             contig = line_data[0]
                             feature = line_data[2]
                             strand = line_data[6]
@@ -253,7 +272,6 @@ def read_separate_files(input_dir, name_split, gene_ident, combined_out, transla
                                 seen_seq_ids[seq_id] + 1
                             else:
                                 seen_seq_ids[seq_id] = 1
-                            seq_id = line_data[8].split('ID=')[1].split(';')[0]
                             gff_features.append((contig, start, end, strand, feature,  seq_id))
             fasta_dict = collections.defaultdict(str)
             with open(corresponding_fasta_file, 'r') as file:
@@ -288,14 +306,20 @@ def read_separate_files(input_dir, name_split, gene_ident, combined_out, transla
                         wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
                         combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
-    if translate == False:
+    if not paired_files_found:
+        sys.exit("Could not find matching GFF/FASTA files - Please check input directory and -name_split_gff and -name_split_fasta parameters.")
+    if translate == False or translate == None:
         #Clean up unused file
-        os.remove(combined_out_file_aa.name)
+        if combined_out_file.name != combined_out_file_aa.name:
+            os.remove(combined_out_file_aa.name)
 
 
 def read_combined_files(input_dir, name_split, gene_ident, combined_out, translate):
     with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
-        for gff_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
+        gff_files = glob.glob(os.path.join(input_dir, '*' + name_split))
+        if not gff_files:
+            sys.exit("Error: No GFF files found - check input directory and -name_split_gff parameter.")
+        for gff_file in gff_files:
             genome_name = os.path.basename(gff_file).split(name_split)[0]
             fasta_dict = collections.defaultdict(str)
             gff_features = []
@@ -352,16 +376,20 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
                             wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
                             combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
-    if translate == False:
+    if translate == False or translate == None:
         #Clean up unused file
-        os.remove(combined_out_file_aa.name)
+        if combined_out_file.name != combined_out_file_aa.name:
+            os.remove(combined_out_file_aa.name)
 
 
 
-def read_fasta_files(input_dir, name_split, combined_out, translate):
+def read_fasta_files(input_dir, name_split_fasta, combined_out, translate):
     with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
-        for fasta_file in glob.glob(os.path.join(input_dir, '*' + name_split)):
-            genome_name = os.path.basename(fasta_file).split(name_split)[0]
+        fasta_files = glob.glob(os.path.join(input_dir, '*' + name_split_fasta))
+        if not fasta_files:
+            sys.exit("Error: No GFF files found.")
+        for fasta_file in fasta_files:
+            genome_name = os.path.basename(fasta_file).split(name_split_fasta)[0]
             fasta_dict = collections.defaultdict(str)
             with open(fasta_file, 'r') as file:
                 lines = file.readlines()
@@ -379,9 +407,10 @@ def read_fasta_files(input_dir, name_split, combined_out, translate):
                     wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
                     combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
-    if translate == False:
+    if translate == False or translate == None:
         #Clean up unused file
-        os.remove(combined_out_file_aa)
+        if combined_out_file.name != combined_out_file_aa.name:
+            os.remove(combined_out_file_aa.name)
 
 def write_groups_func(options, output_dir, key_order, cores, sequences,
                  pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences):
@@ -401,63 +430,65 @@ def write_groups_func(options, output_dir, key_order, cores, sequences,
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
-    combined_fasta_filename = os.path.join(output_dir, "combined_group_sequences_dna.fasta")
+    for group in options.write_groups.split(','):
 
-    # Open combined FASTA file for writing all sequences
-    with open(combined_fasta_filename, 'w') as combined_fasta, open(combined_fasta_filename.replace('_dna.fasta','_aa.fasta'), 'w') as combined_fasta_aa:
-        for key_prefix in key_order:
-            for key, values in cores.items():
-                if any(part in options.write_groups.split(',') for part in key.split('_')):
-                    if key.startswith(key_prefix):
-                        for value in values:
-                            output_filename = f"{key}_{value}_dna.fasta"
-                            if 'First' in key_prefix:
-                                sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
-                            else:
-                                sequences_to_write = combined_pangenome_clusters_Second_sequences[value]
+        combined_fasta_filename = os.path.join(output_dir, "combined_group_sequences_" + group + "_dna.fasta")
 
-                            # Write individual FASTA file
-                            with open(os.path.join(output_dir,output_filename), 'w') as outfile, open(os.path.join(output_dir, output_filename.replace('_dna.fasta','_aa.fasta')), 'w') as outfile_aa:
-                                for header in sequences_to_write:
-                                    if header in sequences:
-                                        sequence = sequences[header]
-                                        wrapped_sequence = wrap_sequence(sequence)
-                                        # Handle Amino Acid Sequences (AA)
-                                        if options.sequence_type == 'AA':
-                                            seq_aa = translate_frame(sequence)
-                                            wrapped_sequence_aa = wrap_sequence(seq_aa)
-                                            # Write individual group file for AA, if option is enabled
-                                            if options.write_individual_groups:
-                                                outfile_aa.write(f">{header}\n")
-                                                outfile_aa.write(f"{wrapped_sequence_aa}\n")
+        # Open combined FASTA file for writing all sequences
+        with open(combined_fasta_filename, 'w') as combined_fasta, open(combined_fasta_filename.replace('_dna.fasta','_aa.fasta'), 'w') as combined_fasta_aa:
+            for key_prefix in key_order:
+                for key, values in cores.items():
+                    if any(part in group for part in key.split('_')):
+                        if key.startswith(key_prefix):
+                            for value in values:
+                                output_filename = f"{key}_{value}_dna.fasta"
+                                if 'First' in key_prefix:
+                                    sequences_to_write = pangenome_clusters_First_sequences_sorted[value]
+                                else:
+                                    sequences_to_write = combined_pangenome_clusters_Second_sequences[value]
+
+                                # Write individual FASTA file
+                                with open(os.path.join(output_dir,output_filename), 'w') as outfile, open(os.path.join(output_dir, output_filename.replace('_dna.fasta','_aa.fasta')), 'w') as outfile_aa:
+                                    for header in sequences_to_write:
+                                        if header in sequences:
+                                            sequence = sequences[header]
+                                            wrapped_sequence = wrap_sequence(sequence)
+                                            # Handle Amino Acid Sequences (AA)
+                                            if options.sequence_type == 'AA':
+                                                seq_aa = translate_frame(sequence)
+                                                wrapped_sequence_aa = wrap_sequence(seq_aa)
+                                                # Write individual group file for AA, if option is enabled
+                                                if options.write_individual_groups:
+                                                    outfile_aa.write(f">{header}\n")
+                                                    outfile_aa.write(f"{wrapped_sequence_aa}\n")
+                                                else:
+                                                    os.remove(outfile_aa.name)  # Delete individual file if option is disabled
+                                                # Always write to the combined AA file
+                                                combined_fasta_aa.write(f">Group_{value}|{header}\n")
+                                                combined_fasta_aa.write(f"{wrapped_sequence_aa}\n")
+                                            # Handle Nucleotide Sequences
                                             else:
-                                                os.remove(outfile_aa.name)  # Delete individual file if option is disabled
-                                            # Always write to the combined AA file
-                                            combined_fasta_aa.write(f">Group_{value}|{header}\n")
-                                            combined_fasta_aa.write(f"{wrapped_sequence_aa}\n")
-                                        # Handle Nucleotide Sequences
-                                        else:
-                                            # If the option is disabled, delete individual AA file (if created)
-                                            try:
-                                                os.remove(outfile_aa.name)  # Ensure outfile_aa is removed when sequence_type isn't 'AA'
-                                            except FileNotFoundError:
-                                                pass
-                                        # Write individual group file for nucleotide sequence, if option is enabled
-                                        if options.write_individual_groups:
-                                            outfile.write(f">{header}\n")
-                                            outfile.write(f"{wrapped_sequence}\n")
-                                        else:
-                                            os.remove(outfile.name)  # Delete individual file if option is disabled
-                                        # Always write to the combined nucleotide file
-                                        combined_fasta.write(f">Group_{value}|{header}\n")
-                                        combined_fasta.write(f"{wrapped_sequence}\n")
+                                                # If the option is disabled, delete individual AA file (if created)
+                                                try:
+                                                    os.remove(outfile_aa.name)  # Ensure outfile_aa is removed when sequence_type isn't 'AA'
+                                                except FileNotFoundError:
+                                                    pass
+                                            # Write individual group file for nucleotide sequence, if option is enabled
+                                            if options.write_individual_groups:
+                                                outfile.write(f">{header}\n")
+                                                outfile.write(f"{wrapped_sequence}\n")
+                                            else:
+                                                os.remove(outfile.name)  # Delete individual file if option is disabled
+                                            # Always write to the combined nucleotide file
+                                            combined_fasta.write(f">Group_{value}|{header}\n")
+                                            combined_fasta.write(f"{wrapped_sequence}\n")
 
-                                    else:
-                                        if options.verbose == True:
-                                            print(f"Sequence {header} not found in original_fasta file.")
-    if options.sequence_type != 'AA':
-        #Clean up unused file
-        os.remove(combined_fasta_aa.name)
+                                        else:
+                                            if options.verbose == True:
+                                                print(f"Sequence {header} not found in original_fasta file.")
+        if options.sequence_type != 'AA':
+            #Clean up unused file
+            os.remove(combined_fasta_aa.name)
     print(f"Combined FASTA file saved to: {combined_fasta_filename}")
 
 
@@ -539,22 +570,23 @@ def process_gene_groups(options, group_directory, sub_group_directory, paralog_g
     else:
         affix = '_dna.fasta'
 
-    # Iterate over each gene family file
-    for gene_file in os.listdir(group_directory):
-        if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
-            #print(gene_file)
-            current_group = int(gene_file.split('_')[3].split('.')[0])
-            gene_path = os.path.join(group_directory, gene_file)
+    if options.align_core == True:
+        # Iterate over each gene family file
+        for gene_file in os.listdir(group_directory):
+            if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
+                #print(gene_file)
+                current_group = int(gene_file.split('_')[3].split('.')[0])
+                gene_path = os.path.join(group_directory, gene_file)
 
-            # Check for matching group in paralog_groups
-            if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
-                for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
-                    if size >= threshold_size:
-                        gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
-                        concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
+                # Check for matching group in paralog_groups
+                if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
+                    for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
+                        if size >= threshold_size:
+                            gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
+                            concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
 
-            else:
-                concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
+                else:
+                    concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
 
 
     # Write the concatenated sequences to the output file

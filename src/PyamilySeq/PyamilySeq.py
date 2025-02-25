@@ -54,8 +54,10 @@ def main():
                              help="Directory containing GFF/FASTA files - Use with -input_type separate/combined.")
     full_parser.add_argument("-input_fasta", required=False,
                              help="Input FASTA file - Use with - input_type fasta.")
-    full_parser.add_argument("-name_split", required=False,
-                             help="Substring to split filenames and extract genome names (e.g., '_combined.gff3') - Use with -input_type separate/combined.")
+    full_parser.add_argument("-name_split_gff", required=False,
+                             help="Substring to split filenames and extract genome names for gff files (e.g., '_combined.gff3') - Use with -input_type separate/combined.")
+    full_parser.add_argument("-name_split_fasta", required=False,
+                             help="Substring to split filenames and extract genome names for fasta files if named differently to paired gff files (e.g., '_dna.fasta') - Use with -input_type separate/combined.")
     full_parser.add_argument("-sequence_type", choices=['AA', 'DNA'], default="AA", required=False,
                              help="Clustering mode: 'DNA' or 'AA'.")
     full_parser.add_argument("-gene_ident", default="CDS", required=False,
@@ -91,12 +93,12 @@ def main():
                                help="Gene groupings for 'Species' mode (default: '99,95,15').")
         subparser.add_argument("-genus_groups", default="1,2,3,4,5,6,7,8,9,10", required=False,
                                help="Gene groupings for 'Genus' mode (default: '1-10').")
-        subparser.add_argument("-w", default=None, dest="write_groups", required=False,
-                               help="Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95').")
-        subparser.add_argument("-wi", action="store_true", dest="write_individual_groups", required=False,
+        subparser.add_argument("-write_groups", default=None, dest="write_groups", required=False,
+                               help="Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95'). - triggers '-wig'.")
+        subparser.add_argument("-write_individual_groups", action="store_true", dest="write_individual_groups", required=False,
                                help="Output individual FASTA files for each group.")
-        subparser.add_argument("-a", action="store_true", dest="align_core", required=False,
-                               help="Align and concatenate sequences for 'core' groups.")
+        subparser.add_argument("-align", action="store_true", dest="align_core", required=False,
+                               help="Align and concatenate sequences for 'core' groups specified with '-w'.")
         subparser.add_argument("-align_aa", action="store_true", required=False,
                                help="Align sequences as amino acids.")
         subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out", required=False,
@@ -115,6 +117,9 @@ def main():
     # Parse Arguments
     options = parser.parse_args()
 
+    if options.write_groups != None and options.write_individual_groups == False:
+        options.write_individual_groups = True
+
     # Example of conditional logic based on selected mode
     print(f"Running PyamilySeq {PyamilySeq_Version} in {options.run_mode} mode:")
     if options.run_mode == "Full" and options.verbose == True:
@@ -129,13 +134,13 @@ def main():
             sys.exit("Currently reclustering only works on Partial Mode.")
         required_full_mode = [options.input_type, options.pident, options.len_diff]
         if options.input_type != 'fasta':
-            required_full_mode.extend([options.input_dir, options.name_split])
+            required_full_mode.extend([options.input_dir, options.name_split_gff])
         if all(required_full_mode):
             # Proceed with the Full mode
             pass
         else:
             missing_options = [opt for opt in
-                               ['input_type', 'input_dir', 'name_split', 'clustering_format', 'pident', 'len_diff'] if
+                               ['input_type', 'input_dir', 'name_split_gff', 'clustering_format', 'pident', 'len_diff'] if
                                not options.__dict__.get(opt)]
             sys.exit(f"Missing required options for Full mode: {', '.join(missing_options)}")
         if options.align_core:
@@ -234,10 +239,10 @@ def main():
             translate = False
             file_to_cluster = combined_out_file
         if options.input_type == 'separate':
-            read_separate_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, translate)
+            read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, translate)
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'combined':
-            read_combined_files(options.input_dir, options.name_split, options.gene_ident, combined_out_file, translate)
+            read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, translate)
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'fasta':
             combined_out_file = options.input_fasta

@@ -29,7 +29,7 @@ To update to the newest version add '-U' to end of the pip install command.
 ```commandline
 usage: PyamilySeq.py [-h] {Full,Partial} ...
 
-PyamilySeq v1.0.1: A tool for gene clustering and analysis.
+PyamilySeq v1.1.0: A tool for gene clustering and analysis.
 
 positional arguments:
   {Full,Partial}  Choose a mode: 'Full' or 'Partial'.
@@ -42,24 +42,24 @@ options:
 ```
 ### 'Full Mode': Will conduct clustering of sequences with CD-HIT as part of PyamilySeq run
 ```
-PyamilySeq Full -output_dir .../PyamilySeq_10_AA_90_80_Full_GFFs -input_type combined -input_dir .../genomes/ -name_split _combined.gff3
+PyamilySeq Full -output_dir .../PyamilySeq_10_AA_90_80_Full_GFFs -input_type combined -input_dir .../genomes/ -name_split_gff _combined.gff3
 ```
 ### 'Partial Mode': Will process the output of a sequence clustering from MMseqs, BLAST, DIAMOND etc.
 ```
-PyamilySeq Partial -clustering_format CD-HIT -cluster_file .../all_10_combined_pep_CD-HIT_90_80.clstr  -original_fasta .../all_10_combined_pep.fasta -output_dir .../PyamilySeq_10_AA_90_80_Partial-w 99 -a 
+PyamilySeq Partial -clustering_format CD-HIT -cluster_file .../all_10_combined_pep_CD-HIT_90_80.clstr  -original_fasta .../all_10_combined_pep.fasta -output_dir .../PyamilySeq_10_AA_90_80_Partial -write_groups 99 -align 
 ```
 
 
 #### Note: using a '-clustering_format' other than the default CD-HIT, requires input to be two in two columns as below (Same format as MMseqs2 tsv and BLAST outfmt 6) - Genome name and sequence name are separated by '|'.
 ```
-Escherichia_coli_110957|ENSB:lL-zIKt-gh0oSno	Escherichia_coli_110957|ENSB:lL-zIKt-gh0oSno
-Escherichia_coli_110957|ENSB:lL-zIKt-gh0oSno	Escherichia_coli_113290|ENSB:2fj4rJ8e8Z9PNdX
-Escherichia_coli_110957|ENSB:lL-zIKt-gh0oSno	Escherichia_coli_b185|ENSB:G_PVe28-ej8q-3S
-Escherichia_coli_110957|ENSB:TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB:TIZS9kbTvShDvyX
+Escherichia_coli_110957|ENSB_lL-zIKt-gh0oSno	Escherichia_coli_110957|ENSB_lL-zIKt-gh0oSno
+Escherichia_coli_110957|ENSB_lL-zIKt-gh0oSno	Escherichia_coli_113290|ENSB_2fj4rJ8e8Z9PNdX
+Escherichia_coli_110957|ENSB_lL-zIKt-gh0oSno	Escherichia_coli_b185|ENSB_G_PVe28-ej8q-3S
+Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX
 ```
 ### Example output:
 ```
-Running PyamilySeq v1.0.1
+Running PyamilySeq v1.1.0
 Calculating Groups
 Number of Genomes: 10
 Gene Groups
@@ -76,51 +76,11 @@ Thank you for using PyamilySeq -- A detailed user manual can be found at https:/
 Please report any issues to: https://github.com/NickJD/PyamilySeq/issues
 ```
 
-[//]: # (## Genus mode: )
-
-[//]: # (### In addition to "Species mode" &#40;see above&#41; which reports gene groups the same as pangenome tools such as Roary and Panaroo, Genus mode reports gene groups identified across multiple genera.)
-
-[//]: # (#### Example:)
-
-[//]: # (```)
-
-[//]: # (PyamilySeq -run_mode Partial -group_mode Genus -clustering_format CD-HIT -output_dir .../test_data/genus/testing/)
-
-[//]: # ( -cluster_file .../test_data/genus/CD-HIT/combined_cds_cd-hit_80_60.clstr -gpa )
-
-[//]: # (```)
-
-[//]: # (```commandline)
-
-[//]: # (Running PyamilySeq v1.0.1)
-
-[//]: # (Calculating Groups)
-
-[//]: # (Genus Groups:)
-[//]: # (First_genera_1:	28549)
-
-[//]: # (First_genera_2:	12)
-
-[//]: # (First_genera_3:	0)
-
-[//]: # (First_genera_>:	0)
-
-[//]: # (Total Number of First Gene Groups &#40;Including Singletons&#41;: 28561)
-
-[//]: # (Outputting gene_presence_absence file)
-
-[//]: # (Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq)
-
-[//]: # (Please report any issues to: https://github.com/NickJD/PyamilySeq/issues)
-
-[//]: # (#####)
-
-[//]: # (```)
 
 ## Reclustering:
 ### Reclustering can be used to see where additional sequences/genes lay in relation to a contemporary pangenome/gene grouping.
 ```
-PyamilySeq Partial -clustering_format CD-HIT -cluster_file .../all_10_combined_pep_CD-HIT_90_80.clstr -reclustered .../all_10_combined_pep_CD-HIT_90_80_AND_StORFs_CD-HIT_90_80.clstr -original_fasta .../all_10_combined_pep_AND_StORFs.fasta -output_dir .../PyamilySeq_10_AA_90_80_Partial_Reclustered_StORFs -w 99 -a 
+PyamilySeq Partial -clustering_format CD-HIT -cluster_file .../all_10_combined_pep_CD-HIT_90_80.clstr -reclustered .../all_10_combined_pep_CD-HIT_90_80_AND_StORFs_CD-HIT_90_80.clstr -original_fasta .../all_10_combined_pep_AND_StORFs.fasta -output_dir .../PyamilySeq_10_AA_90_80_Partial_Reclustered_StORFs -write_groups 99 -align 
 ```
 #### As can be seen below, the additional sequences recovered by the StORF-Reporter annotation tool have 'extended' contemporary or created entirely new gene groups. 'First' corresponds to the groups identified from the first clustering round and 'Second' for the second. In 'reclustering' mode, First_core_# groups are unaffected thus retaining the initial grouping information. 
 ```commandline
@@ -154,25 +114,22 @@ Total Number of First Gene Groups That Had Additional Second Sequences But Not N
 ## PyamilySeq is separated into two main 'run modes', Full and Partial. They each have their own set of required and optional arguments.
 ### PyamilySeq - Full Menu: 
 ```
-usage: PyamilySeq.py Full [-h] -output_dir OUTPUT_DIR -input_type {separate,combined,fasta} [-input_dir INPUT_DIR]
-                          [-input_fasta INPUT_FASTA] [-name_split NAME_SPLIT] [-sequence_type {AA,DNA}] [-gene_ident GENE_IDENT]
-                          [-c PIDENT] [-s LEN_DIFF] [-fast_mode] [-group_mode {Species,Genus}] [-species_groups SPECIES_GROUPS]
-                          [-genus_groups GENUS_GROUPS] [-w WRITE_GROUPS] [-wi] [-a] [-align_aa] [-no_gpa] [-M MEM] [-T THREADS]
-                          [-verbose] [-v]
+usage: PyamilySeq.py Full [-h] -output_dir OUTPUT_DIR -input_type {separate,combined,fasta} [-input_dir INPUT_DIR] [-input_fasta INPUT_FASTA] [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] [-sequence_type {AA,DNA}] [-gene_ident GENE_IDENT] [-c PIDENT] [-s LEN_DIFF] [-fast_mode]
+                          [-group_mode {Species,Genus}] [-species_groups SPECIES_GROUPS] [-genus_groups GENUS_GROUPS] [-write_groups WRITE_GROUPS] [-write_individual_groups] [-align] [-align_aa] [-no_gpa] [-M MEM] [-T THREADS] [-verbose] [-v]
 
 options:
   -h, --help            show this help message and exit
   -output_dir OUTPUT_DIR
                         Directory for all output files.
   -input_type {separate,combined,fasta}
-                        Type of input files: 'separate' for matching FASTA and GFF files, 'combined' for GFF+FASTA, or 'fasta'
-                        for a prepared FASTA file.
+                        Type of input files: 'separate' for matching FASTA and GFF files, 'combined' for GFF+FASTA, or 'fasta' for a prepared FASTA file.
   -input_dir INPUT_DIR  Directory containing GFF/FASTA files - Use with -input_type separate/combined.
   -input_fasta INPUT_FASTA
                         Input FASTA file - Use with - input_type fasta.
-  -name_split NAME_SPLIT
-                        Substring to split filenames and extract genome names (e.g., '_combined.gff3') - Use with -input_type
-                        separate/combined.
+  -name_split_gff NAME_SPLIT_GFF
+                        Substring to split filenames and extract genome names for gff files (e.g., '_combined.gff3') - Use with -input_type separate/combined.
+  -name_split_fasta NAME_SPLIT_FASTA
+                        Substring to split filenames and extract genome names for fasta files if named differently to paired gff files (e.g., '_dna.fasta') - Use with -input_type separate/combined.
   -sequence_type {AA,DNA}
                         Clustering mode: 'DNA' or 'AA'.
   -gene_ident GENE_IDENT
@@ -186,21 +143,23 @@ options:
                         Gene groupings for 'Species' mode (default: '99,95,15').
   -genus_groups GENUS_GROUPS
                         Gene groupings for 'Genus' mode (default: '1-10').
-  -w WRITE_GROUPS       Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95').
-  -wi                   Output individual FASTA files for each group.
-  -a                    Align and concatenate sequences for 'core' groups.
+  -write_groups WRITE_GROUPS
+                        Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95'). - triggers '-wig'.
+  -write_individual_groups
+                        Output individual FASTA files for each group.
+  -align                Align and concatenate sequences for 'core' groups specified with '-w'.
   -align_aa             Align sequences as amino acids.
   -no_gpa               Skip creation of gene_presence_absence.csv.
   -M MEM                Memory allocation for clustering (MB) - CD-HIT parameter '-M'.
   -T THREADS            Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.
   -verbose              Print verbose output.
   -v, --version         Print version number and exit.
+
 ```
 ### PyamilySeq - Partial Menu: 
 ```commandline
-usage: PyamilySeq.py Partial [-h] -clustering_format {CD-HIT,MMseqs,BLAST} -cluster_file CLUSTER_FILE -original_fasta ORIGINAL_FASTA -output_dir OUTPUT_DIR
-                             [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG] [-group_mode {Species,Genus}] [-species_groups SPECIES_GROUPS] [-genus_groups GENUS_GROUPS]
-                             [-w WRITE_GROUPS] [-wi] [-a] [-align_aa] [-no_gpa] [-M MEM] [-T THREADS] [-verbose] [-v]
+usage: PyamilySeq.py Partial [-h] -clustering_format {CD-HIT,MMseqs,BLAST} -cluster_file CLUSTER_FILE -original_fasta ORIGINAL_FASTA -output_dir OUTPUT_DIR [-reclustered RECLUSTERED] [-seq_tag SEQUENCE_TAG] [-group_mode {Species,Genus}] [-species_groups SPECIES_GROUPS] [-genus_groups GENUS_GROUPS]
+                             [-write_groups WRITE_GROUPS] [-write_individual_groups] [-align] [-align_aa] [-no_gpa] [-M MEM] [-T THREADS] [-verbose] [-v]
 
 options:
   -h, --help            show this help message and exit
@@ -222,9 +181,11 @@ options:
                         Gene groupings for 'Species' mode (default: '99,95,15').
   -genus_groups GENUS_GROUPS
                         Gene groupings for 'Genus' mode (default: '1-10').
-  -w WRITE_GROUPS       Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95').
-  -wi                   Output individual FASTA files for each group.
-  -a                    Align and concatenate sequences for 'core' groups.
+  -write_groups WRITE_GROUPS
+                        Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95'). - triggers '-wig'.
+  -write_individual_groups
+                        Output individual FASTA files for each group.
+  -align                Align and concatenate sequences for 'core' groups specified with '-w'.
   -align_aa             Align sequences as amino acids.
   -no_gpa               Skip creation of gene_presence_absence.csv.
   -M MEM                Memory allocation for clustering (MB) - CD-HIT parameter '-M'.
@@ -237,14 +198,13 @@ options:
 ## Seq-Combiner: This tool is provided to enable the pre-processing of multiple GFF/FASTA files together ready to be clustered by the user.
 ### Example:
 ```bash
-Seq-Combiner -input_dir .../test_data/genomes -name_split .gff3 -output_dir .../test_data/genomes -output_name combine_fasta_seqs.fa -input_type combined
+Seq-Combiner -input_dir .../test_data/genomes -name_split_gff .gff3 -output_dir .../test_data/genomes -output_name combine_fasta_seqs.fa -input_type combined
 ```
 ### Seq-Combiner Menu:
 ```
-usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} -name_split NAME_SPLIT -output_dir OUTPUT_DIR -output_name
-                       OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
+usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-PyamilySeq v1.0.1: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
+PyamilySeq v1.1.0: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -252,10 +212,11 @@ options:
 Required Arguments:
   -input_dir INPUT_DIR  Directory location where the files are located.
   -input_type {separate,combined,fasta}
-                        Type of input files: "separate" for separate FASTA and GFF files, "combined" for GFF files with embedded FASTA sequences and "fasta"
-                        for combining multiple FASTA files together.
-  -name_split NAME_SPLIT
-                        substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff').
+                        Type of input files: "separate" for separate FASTA and GFF files, "combined" for GFF files with embedded FASTA sequences and "fasta" for combining multiple FASTA files together.
+  -name_split_gff NAME_SPLIT_GFF
+                        Substring used to split the filename and extract the genome name ('_combined.gff3' or '.gff'). - Not needed with -input_type fasta
+  -name_split_fasta NAME_SPLIT_FASTA
+                        Substring used to split filenames and extract genome names for fasta files if named differently to paired gff files (e.g., '_dna.fasta').
   -output_dir OUTPUT_DIR
                         Directory for all output files.
   -output_name OUTPUT_FILE
@@ -263,19 +224,19 @@ Required Arguments:
 
 Optional Arguments:
   -gene_ident GENE_IDENT
-                        Default - "CDS": Identifier used for extraction of sequences such as
-                        "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo" - Not compatible with "fasta" input mode.
-  -translate            Default - False: Translate extracted sequences to their AA counterpart?
+                        Default - "CDS": Identifier used for extraction of sequences such as "misc_RNA,gene,mRNA,CDS,rRNA,tRNA,tmRNA,CRISPR,ncRNA,regulatory_region,oriC,pseudo" - Not compatible with "fasta" input mode.
+  -translate            Default - False: Translate extracted sequences to their AA counterpart? - appends _aa.fasta to given output_name
 
 Misc Arguments:
   -v, --version         Print out version number and exit
+
 
 ```
 
 ## Group-Splitter: This tool can split multi-copy gene groups using CD-HIT after initial PyamilySeq analysis.
 ### Example:
 ```bash
-Group-Splitter -genome_num 74 -input_fasta .../test/species/ -output_dir .../test/species/ -sequence_type AA
+Group-Splitter -genome_num 10 -input_fasta .../test/species/ -output_dir .../test/species/ -sequence_type AA
 ```
 ### Group-Splitter Menu:
 ```
@@ -286,7 +247,7 @@ usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -sequence_type {AA,DNA}
                          [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
                          [-verbose] [-v]
 
-PyamilySeq v1.0.1: Group-Splitter - A tool to split multi-copy gene groups
+PyamilySeq v1.1.0: Group-Splitter - A tool to split multi-copy gene groups
 identified by PyamilySeq.
 
 options:
@@ -332,14 +293,14 @@ Misc Parameters:
 ## Cluster-Summary menu: This tool can be used to summarise CD-HIT .clstr files:
 ### Example:
 ```bash
-Cluster-Summary -genome_num 74 -input_clstr .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80.clstr -output_tsv .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80_Summary.tsv
+Cluster-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80.clstr -output_tsv .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80_Summary.tsv
 ```
 ### Cluster-Summary Menu: 
 ```
 usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
                           [-output_dir OUTPUT_DIR] [-verbose] [-v]
 
-PyamilySeq v1.0.1: Cluster-Summary - A tool to summarise CD-HIT clustering files.
+PyamilySeq v1.1.0: Cluster-Summary - A tool to summarise CD-HIT clustering files.
 
 options:
   -h, --help            show this help message and exit
