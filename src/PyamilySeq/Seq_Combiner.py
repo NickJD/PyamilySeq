@@ -65,17 +65,17 @@ def main():
     if not os.path.exists(output_path):
         os.makedirs(output_path)
 
-    output_file = options.output_file + '.fasta'
-    if os.path.exists(os.path.join(output_path, output_file)):
-        print(f"Output file {output_file} already exists in the output directory. Please delete or rename the file and try again.")
+    #output_file = options.output_file + '.fasta'
+    if os.path.exists(os.path.join(output_path, options.output_file)):
+        print(f"Output file {options.output_file} already exists in the output directory. Please delete or rename the file and try again.")
         exit(1)
 
-    combined_out_file = os.path.join(output_path, output_file )
+    combined_out_file = os.path.join(output_path, options.output_file )
 
     if options.input_type == 'separate':
-        read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, options.translate)
+        read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, options.translate, True)
     elif options.input_type == 'combined':
-        read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, options.translate)
+        read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, options.translate, True)
     elif options.input_type == 'fasta':
         read_fasta_files(options.input_dir, options.name_split_fasta, combined_out_file, options.translate)
 

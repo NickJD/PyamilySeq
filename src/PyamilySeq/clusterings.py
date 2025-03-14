@@ -279,8 +279,6 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
     first = True
     for line in Second_in:
         if line.startswith('>'):
-            if '>Cluster 1997' in line:
-                print()
             if first == False:
                 cluster_size = len(Combined_clusters[cluster_id])
                 Combined_reps.update({rep: cluster_size})

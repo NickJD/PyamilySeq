@@ -20,8 +20,8 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         clustering_mode,
         '-i', input_file,
         '-o', clustering_output,
-        '-c', str(options.pident),
-        '-s', str(options.len_diff),
+        '-c', f"{float(options.pident):.2f}",
+        '-s', f"{float(options.len_diff):.2f}",
         '-T', str(options.threads),
         '-M', str(options.mem),
         '-d', "0",
@@ -62,10 +62,11 @@ def main():
                              help="Clustering mode: 'DNA' or 'AA'.")
     full_parser.add_argument("-gene_ident", default="CDS", required=False,
                              help="Gene identifiers to extract sequences (e.g., 'CDS, tRNA').")
-    full_parser.add_argument("-c", type=float, dest="pident", default=0.90, required=False,
+    full_parser.add_argument("-c", type=str, dest="pident", default="0.90", required=False,
                              help="Sequence identity threshold for clustering (default: 0.90) - CD-HIT parameter '-c'.")
-    full_parser.add_argument("-s", type=float, dest="len_diff", default=0.80, required=False,
+    full_parser.add_argument("-s", type=str, dest="len_diff", default="0.80", required=False,
                              help="Length difference threshold for clustering (default: 0.80) - CD-HIT parameter '-s'.")
+
     full_parser.add_argument("-fast_mode", action="store_true", required=False,
                              help="Enable fast mode for CD-HIT (not recommended) - CD-HIT parameter '-g'.")
 
@@ -98,7 +99,7 @@ def main():
         subparser.add_argument("-write_individual_groups", action="store_true", dest="write_individual_groups", required=False,
                                help="Output individual FASTA files for each group.")
         subparser.add_argument("-align", action="store_true", dest="align_core", required=False,
-                               help="Align and concatenate sequences for 'core' groups specified with '-w'.")
+                               help="Align and concatenate sequences for 'core' groups (those in 99-100% of genomes).")
         subparser.add_argument("-align_aa", action="store_true", required=False,
                                help="Align sequences as amino acids.")
         subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out", required=False,
@@ -187,13 +188,13 @@ def main():
             elif options.sequence_type == 'AA':
                 clustering_mode = 'cd-hit'
             if options.fast_mode == True:
-                options.fast_mode = 0
+                options.fast_mode = 1
                 if options.verbose == True:
                     print("Running CD-HIT in fast mode.")
             else:
-                options.fast_mode = 1
+                options.fast_mode = 0
                 if options.verbose == True:
-                    print("Running CD-HIT in slow mode.")
+                    print("Running CD-HIT in accurate mode.")
         else:
             exit("cd-hit is not installed. Please install cd-hit to proceed.")
 
@@ -239,10 +240,10 @@ def main():
             translate = False
             file_to_cluster = combined_out_file
         if options.input_type == 'separate':
-            read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, translate)
+            read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, translate, False)
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'combined':
-            read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, translate)
+            read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, translate, False)
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'fasta':
             combined_out_file = options.input_fasta
@@ -281,6 +282,8 @@ def main():
         clustering_options = clustering_options()
 
     elif options.run_mode == 'Partial':
+        if not os.path.exists(output_path):
+            os.makedirs(output_path)
         class clustering_options:
             def __init__(self):
                 self.run_mode = options.run_mode

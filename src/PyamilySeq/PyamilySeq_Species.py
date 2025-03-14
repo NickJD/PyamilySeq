@@ -120,12 +120,14 @@ def calc_Second_only_core(cluster, Second_num, groups, cores):
 
 #@profile
 def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count the true storf onlies
-    groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= Second_num <= fir):
-        res = idx
-    family_group = list(groups)[res]
-    cores['only_Second_core_' + family_group].append(cluster)
-
+    try:
+        groups_as_list = list(groups.values())
+        for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= Second_num <= fir):
+            res = idx
+        family_group = list(groups)[res]
+        cores['only_Second_core_' + family_group].append(cluster)
+    except UnboundLocalError:
+        sys.exit("Error in calc_only_Second_only_core")
 
 
 #@profile
