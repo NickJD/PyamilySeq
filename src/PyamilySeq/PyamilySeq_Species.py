@@ -15,14 +15,15 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
     #in_name = options.clusters.split('.')[0].split('/')[-1]
     gpa_outfile = os.path.join(output_dir, 'gene_presence_absence.csv')
     gpa_outfile = open(gpa_outfile, 'w')
-    gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
+    genome_dict = OrderedDict(sorted(genome_dict.items()))
+    gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment",'
                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
     gpa_outfile.write('","'.join(genome_dict.keys()))
     gpa_outfile.write('"\n')
     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
         average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
         gpa_outfile.write('"group_'+str(cluster)+'","","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
-                         '","","","","","","","","",""')
+                         '","","","","","","","",""')
 
 
         for genome in genome_dict.keys():

@@ -17,7 +17,8 @@ def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_s
     #in_name = options.clusters.split('.')[0].split('/')[-1]
     gpa_outfile = os.path.join(output_dir, 'gene_presence_absence.csv')
     gpa_outfile = open(gpa_outfile, 'w')
-    gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment","'
+    genus_dict = OrderedDict(sorted(genus_dict.items()))
+    gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment",'
                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
     gpa_outfile.write('","'.join(genus_dict.keys()))
     gpa_outfile.write('"\n')

@@ -1,5 +1,5 @@
 import argparse
-
+#from config import config_params
 
 try:
     from .PyamilySeq_Species import cluster as species_cluster
@@ -67,7 +67,7 @@ def main():
     full_parser.add_argument("-s", type=str, dest="len_diff", default="0.80", required=False,
                              help="Length difference threshold for clustering (default: 0.80) - CD-HIT parameter '-s'.")
 
-    full_parser.add_argument("-fast_mode", action="store_true", required=False,
+    full_parser.add_argument("-fast_mode", action="store_true",
                              help="Enable fast mode for CD-HIT (not recommended) - CD-HIT parameter '-g'.")
 
 
@@ -95,14 +95,14 @@ def main():
         subparser.add_argument("-genus_groups", default="1,2,3,4,5,6,7,8,9,10", required=False,
                                help="Gene groupings for 'Genus' mode (default: '1-10').")
         subparser.add_argument("-write_groups", default=None, dest="write_groups", required=False,
-                               help="Output gene groups as a single FASTA file (specify levels: e.g., '-w 99,95'). - triggers '-wig'.")
-        subparser.add_argument("-write_individual_groups", action="store_true", dest="write_individual_groups", required=False,
+                               help="Output gene groups as a single FASTA file (e.g., '99,95'). Triggers writing individual groups.")
+        subparser.add_argument("-write_individual_groups", action="store_true", dest="write_individual_groups",
                                help="Output individual FASTA files for each group.")
-        subparser.add_argument("-align", action="store_true", dest="align_core", required=False,
-                               help="Align and concatenate sequences for 'core' groups (those in 99-100% of genomes).")
-        subparser.add_argument("-align_aa", action="store_true", required=False,
+        subparser.add_argument("-align", action="store_true", dest="align_core",
+                               help="Align and concatenate sequences for 'core' groups (those in 99-100%% of genomes).")
+        subparser.add_argument("-align_aa", action="store_true",
                                help="Align sequences as amino acids.")
-        subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out", required=False,
+        subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out",
                                help="Skip creation of gene_presence_absence.csv.")
         subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
                                  help="Memory allocation for clustering (MB) - CD-HIT parameter '-M'.")
@@ -110,13 +110,15 @@ def main():
                                  help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
 
         # Miscellaneous Arguments
-        subparser.add_argument("-verbose", action="store_true", required=False,
+        subparser.add_argument("-verbose", action="store_true",
                             help="Print verbose output.")
         subparser.add_argument("-v", "--version", action="version",
-                            version=f"PyamilySeq {PyamilySeq_Version}: Exiting.", help="Print version number and exit.")
+                            version=f"PyamilySeq {PyamilySeq_Version}: Exiting.")
 
     # Parse Arguments
     options = parser.parse_args()
+    ## Configuration
+
 
     if options.write_groups != None and options.write_individual_groups == False:
         options.write_individual_groups = True
@@ -147,7 +149,7 @@ def main():
         if options.align_core:
             options.write_individual_groups = True
             if options.write_groups == None:
-                sys.exit('Must provide "-w" to output gene groups before alignment "-a" can be done.')
+                sys.exit('Must provide "-write_groups" to output gene groups before alignment "-align" can be done.')
     elif options.run_mode == 'Partial':
         required_partial_mode = [options.cluster_file, options.original_fasta]
         if all(required_partial_mode):

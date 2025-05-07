@@ -27,14 +27,18 @@ def process_files(file_paths):
                 for j in range(i + 1, len(genes)):
                     gene2 = genes[j]
                     G.add_edge(gene1, gene2, group=group_id, source_file=file_name)
-
+    # Now remove nodes with only one connection (degree 1)
+    degree_one_nodes = [node for node, degree in G.degree() if degree == 5]
+    print(f"Removing {len(degree_one_nodes)} nodes with degree 5")
+    G.remove_nodes_from(degree_one_nodes)
+    print(f"Nodes after pruning: {len(G.nodes)}")
     return G
 
 
 # Example usage: Load all CSV files in a directory
-file_paths = glob.glob("/Users/macbookair/Git/PyamilySeq/test_data/CSVs/*.csv")
+file_paths = glob.glob("../test_data/CSVs/*.csv")
 network = process_files(file_paths)
 
 # Export to Cytoscape-compatible format
-nx.write_graphml(network, "source_file_cytoscape_network.graphml")
+nx.write_graphml(network, "74_cytoscape_network_roary_panaroo_pruned.graphml")
 print("Network saved as cytoscape_network.graphml")
