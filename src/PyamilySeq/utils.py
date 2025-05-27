@@ -7,7 +7,6 @@ from tempfile import NamedTemporaryFile
 import sys
 import re
 import math
-#from config import config_params
 
 ####
 # Placeholder for the distance function
@@ -15,11 +14,10 @@ levenshtein_distance_cal = None
 # Check for Levenshtein library once
 try:
     import Levenshtein as LV
-    # Assign the optimized function
+    # Assign the optimised function
     def levenshtein_distance_calc(seq1, seq2):
         return LV.distance(seq1, seq2)
 except (ModuleNotFoundError, ImportError):
-    #if config_params.verbose == True: - Not implemented yet
     print("Levenshtein package not installed - Will fallback to slower Python implementation.")
     # Fallback implementation
     def levenshtein_distance_calc(seq1, seq2):

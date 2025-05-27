@@ -59,7 +59,7 @@ def main():
         exit(1)
     if options.input_type == 'fasta' and options.name_split_fasta is None:
         print("Please provide a substring to split the filename and extract the genome name.")
-        exit
+        exit(1)
 
     output_path = os.path.abspath(options.output_dir)
     if not os.path.exists(output_path):
@@ -77,7 +77,7 @@ def main():
     elif options.input_type == 'combined':
         read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, options.translate, True)
     elif options.input_type == 'fasta':
-        read_fasta_files(options.input_dir, options.name_split_fasta, combined_out_file, options.translate)
+        read_fasta_files(options.input_dir, options.name_split_fasta, combined_out_file, options.translate, True)
 
 if __name__ == "__main__":
     main()
