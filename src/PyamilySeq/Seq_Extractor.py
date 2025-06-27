@@ -9,8 +9,13 @@ def find_gene_ids_in_csv(csv_file, group_name):
             cells = line.strip().split(',')
             if cells[0].replace('"','') == group_name:
                 # Collect gene IDs from column 14 onward
+                # for cell in cells[14:]:
+                #     gene_ids.extend(cell.strip().replace('"','').split())  # Splitting by spaces if there are multiple IDs in a cell                break
                 for cell in cells[14:]:
-                    gene_ids.extend(cell.strip().replace('"','').split())  # Splitting by spaces if there are multiple IDs in a cell                break
+                    for gene in cell.strip().replace('"', '').split(';'):
+                        if gene:
+                            gene_ids.append(gene)
+
     return gene_ids
 
 def extract_sequences(fasta_file, gene_ids):

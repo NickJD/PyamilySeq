@@ -1,0 +1,54 @@
+Mean Pairwise RF Distances:
+Roary: 0.8920 (std: 0.0695)
+Roary_dsp: 0.9080 (std: 0.0683)
+Panaroo: 0.9120 (std: 0.0682)
+Panaroo_refound: 0.8937 (std: 0.1597)
+PyamilySeq_90_80: 0.9108 (std: 0.0732)
+PyamilySeq_90_0: 0.8956 (std: 0.0708)
+
+Pairwise Comparisons:
+Roary vs Roary_dsp:
+  KS statistic = 0.1027, p = 0
+  Mann–Whitney U = 51150389672.5000, p = 0
+Roary vs Panaroo:
+  KS statistic = 0.1247, p = 0
+  Mann–Whitney U = 64956136717.5000, p = 0
+Roary vs Panaroo_refound:
+  KS statistic = 0.1440, p = 0
+  Mann–Whitney U = 77990215302.0000, p = 0
+Roary vs PyamilySeq_90_80:
+  KS statistic = 0.1185, p = 0
+  Mann–Whitney U = 12727333804.5000, p = 0
+Roary vs PyamilySeq_90_0:
+  KS statistic = 0.0264, p = 4.895e-109
+  Mann–Whitney U = 69380263261.0000, p = 2.621e-107
+Roary_dsp vs Panaroo:
+  KS statistic = 0.0281, p = 1.161e-88
+  Mann–Whitney U = 32768482644.5000, p = 3.027e-100
+Roary_dsp vs Panaroo_refound:
+  KS statistic = 0.0523, p = 0
+  Mann–Whitney U = 39194493941.5000, p = 2.554e-263
+Roary_dsp vs PyamilySeq_90_80:
+  KS statistic = 0.0498, p = 4.449e-100
+  Mann–Whitney U = 6381194826.5000, p = 7.564e-28
+Roary_dsp vs PyamilySeq_90_0:
+  KS statistic = 0.0814, p = 0
+  Mann–Whitney U = 34309214602.0000, p = 0
+Panaroo vs Panaroo_refound:
+  KS statistic = 0.0263, p = 3.693e-99
+  Mann–Whitney U = 53512002557.5000, p = 1.685e-45
+Panaroo vs PyamilySeq_90_80:
+  KS statistic = 0.0269, p = 5.082e-31
+  Mann–Whitney U = 8700600787.5000, p = 0.1892
+Panaroo vs PyamilySeq_90_0:
+  KS statistic = 0.1018, p = 0
+  Mann–Whitney U = 46573340250.0000, p = 0
+Panaroo_refound vs PyamilySeq_90_80:
+  KS statistic = 0.0283, p = 3.052e-35
+  Mann–Whitney U = 10811604782.0000, p = 2.879e-17
+Panaroo_refound vs PyamilySeq_90_0:
+  KS statistic = 0.1191, p = 0
+  Mann–Whitney U = 57549107481.0000, p = 0
+PyamilySeq_90_80 vs PyamilySeq_90_0:
+  KS statistic = 0.0925, p = 0
+  Mann–Whitney U = 8961934402.0000, p = 0
