@@ -156,7 +156,7 @@ def cluster_MMseqs(options,splitter):
 
 
 #@profile
-def combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, splitter):
+def combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences, splitter):
     num_clustered_First = defaultdict(list)
     pangenome_clusters_Type = copy.deepcopy(pangenome_clusters_First)
     list_of_reps = list(reps.keys())
@@ -333,6 +333,7 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
 
 
     return combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences
+
 
 
 

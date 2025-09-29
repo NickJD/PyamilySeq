@@ -315,7 +315,9 @@ def main():
 
 
     # Save arguments to a text file
+    from datetime import datetime
     with open(output_path+"/PyamilySeq_params.txt", "w") as outfile:
+        outfile.write(f"Timestamp: {datetime.now().isoformat()}\n")
         for arg, value in vars(options).items():
             outfile.write(f"{arg}: {value}\n")
 
