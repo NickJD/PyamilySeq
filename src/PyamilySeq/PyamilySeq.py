@@ -249,7 +249,6 @@ def main():
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'fasta':
             combined_out_file = options.input_fasta
-            ### FIX write code to detect if DNA or AA and if sequence tpye is AA then translate
             # Detect if the input FASTA file contains DNA or AA sequences
             is_dna = detect_sequence_type(options.input_fasta)
             # If the sequence type is AA and the input is DNA, translate the DNA to AA

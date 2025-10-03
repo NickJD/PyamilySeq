@@ -22,7 +22,7 @@ def load_distance_matrix(path):
 
 def main():
     parser = argparse.ArgumentParser(description="Compare RF distance matrices from multiple tools")
-    parser.add_argument("matrices", nargs='+', help="CSV files of RF matrices from different tools")
+    parser.add_argument("--matrices", nargs='+', help="CSV files of RF matrices from different tools")
     parser.add_argument("--labels", nargs='+', help="Labels for tools (must match number of matrices)")
     parser.add_argument("--output", default="rf_summary.txt", help="Output summary file")
     parser.add_argument("--plot", default="rf_distributions.png", help="Output comparison plot")
