@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyamilySeq"
-version = "1.3.1"
+version = "1.3.2"
 authors = [
     {name = "Nicholas Dimonaco", email = "nicholas@dimonaco.co.uk"}
 ]
@@ -33,10 +33,10 @@ Homepage = "https://github.com/NickJD/PyamilySeq"
     seq-combiner = "PyamilySeq.Seq_Combiner:main"
     Group-Splitter = "PyamilySeq.Group_Splitter:main"
     group-splitter = "PyamilySeq.Group_Splitter:main"
-    Cluster-Summary = "PyamilySeq.Cluster_Summary:main"
-    cluster-summary = "PyamilySeq.Cluster_Summary:main"
-    Cluster-Extractor = "PyamilySeq.Cluster_Extractor:main"
-    cluster-extractor = "PyamilySeq.Cluster_Extractor:main"
+    Group-Extractor = "PyamilySeq.Group_Extractor:main"
+    group-extractor = "PyamilySeq.Group_Extractor:main"
+    Group-Summary = "PyamilySeq.Group_Summary:main"
+    group-summary = "PyamilySeq.Group_Summary:main"
     Seq-Finder = "PyamilySeq.Seq_Finder:main"
     seq-finder = "PyamilySeq.Seq_Finder:main"
     Seq-Extractor = "PyamilySeq.Seq_Extractor:main"

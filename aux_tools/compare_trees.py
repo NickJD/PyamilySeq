@@ -1,8 +1,8 @@
 from ete3 import Tree
 
 # Load trees from Newick format
-tree1 = Tree("/Users/nicholas/Nextcloud/Current_Work/PyamilySeq/E-coli/10_genome/roary_aligned_cpu8/core_gene_alignment.nwk")  # Replace with your file path
-tree2 = Tree("/Users/nicholas/Nextcloud/Current_Work/PyamilySeq/E-coli/10_genome/panaroo_aligned_cpu8/core_gene_alignment.nwk")  # Replace with your file path
+tree1 = Tree("/mnt/Internal/Nextcloud/Current_Work/PyamilySeq/E-coli/74_genome/PyamilySeq_Full_cds_AA_90_0/core_gene_alignment.nwk")  # Replace with your file path
+tree2 = Tree("/mnt/Internal/Nextcloud/Current_Work/PyamilySeq/E-coli/74_genome/PyamilySeq_Full_DNA_90_0/core_gene_alignment.nwk")  # Replace with your file path
 
 
 rf_result = tree1.robinson_foulds(tree2, unrooted_trees=True)

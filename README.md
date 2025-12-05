@@ -29,7 +29,7 @@ To update to the newest version add '-U' to end of the pip install command.
 ```commandline
 usage: PyamilySeq.py [-h] {Full,Partial} ...
 
-PyamilySeq v1.3.1: A tool for gene clustering and analysis.
+PyamilySeq v1.3.2: A tool for gene clustering and analysis.
 
 positional arguments:
   {Full,Partial}  Choose a mode: 'Full' or 'Partial'.
@@ -59,7 +59,7 @@ Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB_TIZS9k
 ```
 ### Example output:
 ```
-Running PyamilySeq v1.3.1
+Running PyamilySeq v1.3.2
 Calculating Groups
 Number of Genomes: 10
 Gene Groups
@@ -204,7 +204,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split_gff .gff3 -output_dir 
 ```
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-PyamilySeq v1.3.1: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
+PyamilySeq v1.3.2: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -247,7 +247,7 @@ usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -sequence_type {AA,DNA}
                          [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
                          [-verbose] [-v]
 
-PyamilySeq v1.3.1: Group-Splitter - A tool to split multi-copy gene groups
+PyamilySeq v1.3.2: Group-Splitter - A tool to split multi-copy gene groups
 identified by PyamilySeq.
 
 options:
@@ -290,17 +290,17 @@ Misc Parameters:
 
 ```
 
-## Cluster-Summary menu: This tool can be used to summarise CD-HIT .clstr files:
+## Group-Summary menu: This tool can be used to summarise CD-HIT .clstr files:
 ### Example:
 ```bash
-Cluster-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80.clstr -output_tsv .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80_Summary.tsv
+Group-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80.clstr -output_tsv .../test_data/species/E-coli/E-coli_extracted_pep_cd-hit_80_Summary.tsv
 ```
-### Cluster-Summary Menu: 
+### Group-Summary Menu: 
 ```
 usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
                           [-output_dir OUTPUT_DIR] [-verbose] [-v]
 
-PyamilySeq v1.3.1: Cluster-Summary - A tool to summarise CD-HIT clustering files.
+PyamilySeq v1.3.2: Group-Summary - A tool to summarise CD-HIT clustering files.
 
 options:
   -h, --help            show this help message and exit

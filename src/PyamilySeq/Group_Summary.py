@@ -108,9 +108,9 @@ def summarise_clusters(options, clusters, output):
 
 
 def main():
-    """Main function to parse arguments and process clustering files."""
+    # Main function to parse arguments and process clustering files.
     parser = argparse.ArgumentParser(
-        description='PyamilySeq ' + PyamilySeq_Version + ': Cluster-Summary - A tool to summarise CD-HIT clustering files.')
+        description='PyamilySeq ' + PyamilySeq_Version + ': Group-Summary - A tool to summarise CD-HIT clustering files.')
 
     # Required Arguments
     required = parser.add_argument_group('Required Parameters')
