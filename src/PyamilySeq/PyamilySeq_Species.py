@@ -228,7 +228,7 @@ def calc_single_First_extended_Second_only_core(cluster, First_num, groups, core
 
 
 #@profile
-def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
+def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count seperately those gene families extended with StORF-Reporter but combined >1 PEP
     groups_as_list = list(groups.values())
     # Looping through the list to find the matching condition
     for idx, (sec, fir) in enumerate(groups_as_list):

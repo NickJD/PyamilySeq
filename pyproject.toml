@@ -56,5 +56,4 @@ include = ["PyamilySeq*"]
 
 [tool.setuptools.package-data]
 PyamilySeq = [
-
 ]

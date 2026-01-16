@@ -88,7 +88,7 @@ def calc_single_First_extended_Second_only_core(cluster, First_num, cores, Secon
     except KeyError:
         cores['extended_genera_>'].append(cluster)
 #@profile
-def calc_multi_First_extended_Second_only_core(cluster, First_num, cores, Second_num): # Count seperately those gene families extended with StORF_Reporter but combined >1 PEP
+def calc_multi_First_extended_Second_only_core(cluster, First_num, cores, Second_num): # Count seperately those gene families extended with StORF-Reporter but combined >1 PEP
     group = First_num + Second_num
     try:
         cores['combined_genera_' + str(group)].append(cluster)

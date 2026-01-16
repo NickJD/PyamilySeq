@@ -441,7 +441,7 @@ def combined_clustering_Edge_List(options, splitter):
             combined_pangenome_clusters_Second_sequences[str(cluster_id)].append(child)
         else:
             if str(cluster_id) not in not_Second_only_cluster_ids:
-                not_Second_only_cluster_ids.append(str(cluster_id))  # Tell us which StORF_Reporter clustered are unmatched to a PEP
+                not_Second_only_cluster_ids.append(str(cluster_id))  # Tell us which StORF-Reporter clustered are unmatched to a PEP
             if child_taxa not in combined_pangenome_clusters_First[str(cluster_id)]:
                 combined_pangenome_clusters_First[str(cluster_id)].append(child_taxa)
             combined_pangenome_clusters_First_sequences[str(cluster_id)].append(child)
