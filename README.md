@@ -29,7 +29,7 @@ To update to the newest version add '-U' to end of the pip install command.
 ```commandline
 usage: PyamilySeq.py [-h] {Full,Partial} ...
 
-PyamilySeq v1.3.2: A tool for gene clustering and analysis.
+PyamilySeq v1.3.3: A tool for gene clustering and analysis.
 
 positional arguments:
   {Full,Partial}  Choose a mode: 'Full' or 'Partial'.
@@ -59,7 +59,7 @@ Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB_TIZS9k
 ```
 ### Example output:
 ```
-Running PyamilySeq v1.3.2
+Running PyamilySeq v1.3.3
 Calculating Groups
 Number of Genomes: 10
 Gene Groups
@@ -114,7 +114,7 @@ Total Number of First Gene Groups That Had Additional Second Sequences But Not N
 ## PyamilySeq is separated into two main 'run modes', Full and Partial. They each have their own set of required and optional arguments.
 ### PyamilySeq - Full Menu: 
 ```
-usage: PyamilySeq.py Full [-h] -output_dir OUTPUT_DIR -input_type {separate,combined,fasta} [-input_dir INPUT_DIR] [-input_fasta INPUT_FASTA] [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] [-sequence_type {AA,DNA}] [-gene_ident GENE_IDENT] [-c PIDENT] [-s LEN_DIFF] [-fast_mode]
+usage: PyamilySeq.py Full [-h] -output_dir OUTPUT_DIR -input_type {separate,combined,fasta} [-input_dir INPUT_DIR] [-input_fasta INPUT_FASTA] [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] [-seq_type {AA,DNA}] [-gene_ident GENE_IDENT] [-c PIDENT] [-s LEN_DIFF] [-fast_mode]
                           [-group_mode {Species,Genus}] [-species_groups SPECIES_GROUPS] [-genus_groups GENUS_GROUPS] [-write_groups WRITE_GROUPS] [-write_individual_groups] [-align] [-align_aa] [-no_gpa] [-M MEM] [-T THREADS] [-verbose] [-v]
 
 options:
@@ -130,7 +130,7 @@ options:
                         Substring to split filenames and extract genome names for gff files (e.g., '_combined.gff3') - Use with -input_type separate/combined.
   -name_split_fasta NAME_SPLIT_FASTA
                         Substring to split filenames and extract genome names for fasta files if named differently to paired gff files (e.g., '_dna.fasta') - Use with -input_type separate/combined.
-  -sequence_type {AA,DNA}
+  -seq_type {AA,DNA}
                         Clustering mode: 'DNA' or 'AA'.
   -gene_ident GENE_IDENT
                         Gene identifiers to extract sequences (e.g., 'CDS, tRNA').
@@ -204,7 +204,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split_gff .gff3 -output_dir 
 ```
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-PyamilySeq v1.3.2: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
+PyamilySeq v1.3.3: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -236,18 +236,18 @@ Misc Arguments:
 ## Group-Splitter: This tool can split multi-copy gene groups using CD-HIT after initial PyamilySeq analysis.
 ### Example:
 ```bash
-Group-Splitter -genome_num 10 -input_fasta .../test/species/ -output_dir .../test/species/ -sequence_type AA
+Group-Splitter -genome_num 10 -input_fasta .../test/species/ -output_dir .../test/species/ -seq_type AA
 ```
 ### Group-Splitter Menu:
 ```
-usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -sequence_type {AA,DNA}
+usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -seq_type {AA,DNA}
                          -genome_num GENOME_NUM -output_dir OUTPUT_DIR
                          [-groups GROUPS] [-group_threshold GROUP_THRESHOLD]
                          [-c PIDENT] [-s LEN_DIFF] [-T CLUSTERING_THREADS]
                          [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
                          [-verbose] [-v]
 
-PyamilySeq v1.3.2: Group-Splitter - A tool to split multi-copy gene groups
+PyamilySeq v1.3.3: Group-Splitter - A tool to split multi-copy gene groups
 identified by PyamilySeq.
 
 options:
@@ -256,7 +256,7 @@ options:
 Required Parameters:
   -input_fasta INPUT_FASTA
                         Input FASTA file containing gene groups.
-  -sequence_type {AA,DNA}
+  -seq_type {AA,DNA}
                         Default - DNA: Are groups "DNA" or "AA" sequences?
   -genome_num GENOME_NUM
                         The total number of genomes must be provide
@@ -300,7 +300,7 @@ Group-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_ex
 usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
                           [-output_dir OUTPUT_DIR] [-verbose] [-v]
 
-PyamilySeq v1.3.2: Group-Summary - A tool to summarise CD-HIT clustering files.
+PyamilySeq v1.3.3: Group-Summary - A tool to summarise CD-HIT clustering files.
 
 options:
   -h, --help            show this help message and exit

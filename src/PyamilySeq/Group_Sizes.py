@@ -1,6 +1,14 @@
-import argparse
+
 import os
 import csv
+import logging
+
+
+# Use centralised logger factory from constants
+try:
+    from .constants import configure_logger, LoggingArgumentParser
+except Exception:
+    from constants import configure_logger, LoggingArgumentParser
 
 
 def parse_fasta_stats(fasta_file):
@@ -43,9 +51,7 @@ def parse_fasta_stats(fasta_file):
 
 
 def process_fasta_directory(input_dir, output_csv):
-    """
-    Processes a directory of FASTA files and writes statistics to a CSV file.
-    """
+    logger = logging.getLogger("PyamilySeq.Group_Sizes")
     results = []
     for filename in os.listdir(input_dir):
         if filename.endswith(".fasta"):
@@ -68,19 +74,27 @@ def process_fasta_directory(input_dir, output_csv):
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(results)
+    logger.info("Wrote statistics for %d FASTA files to %s", len(results), output_csv)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Summarize sequence statistics for a directory of FASTA files.")
+    # Early console-only logger so the parser.description is emitted via logger before argparse prints usage/help.
+    early_logger = configure_logger("PyamilySeq.Group_Sizes", enable_file=False, log_dir=None, verbose=False)
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.Group_Sizes", description="Group-Sizes - A tool to summarise sequence statistics for a directory of FASTA files.")
     parser.add_argument("-input_dir", required=True, help="Directory containing FASTA files.")
     parser.add_argument("-output_csv", required=True, help="Output CSV file to save statistics.")
+    parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
+    parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: same dir as -output_csv).")
 
     args = parser.parse_args()
 
-    # Process the directory of FASTA files
-    print("Processing FASTA files...")
+    out_dir = os.path.abspath(os.path.dirname(args.output_csv)) if args.output_csv else os.getcwd()
+    log_dir = args.log_dir if args.log_dir else out_dir
+    logger = configure_logger("PyamilySeq.Group_Sizes", enable_file=args.log, log_dir=log_dir, verbose=False)
+
+    logger.info("Processing FASTA files in %s", args.input_dir)
     process_fasta_directory(args.input_dir, args.output_csv)
-    print(f"Statistics saved to {args.output_csv}")
+    logger.info("Statistics saved to %s", args.output_csv)
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from utils import *
 
 
-def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted,
+def gene_presence_absence_output(options, genome_dict,
                                  pangenome_clusters_First_sequences_sorted,
                                  combined_pangenome_clusters_First_Second_clustered=None,
                                  combined_pangenome_clusters_Second_sequences_sorted=None):
@@ -137,48 +137,6 @@ def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_
     if options.reclustered is not None:
         print(f"Merged Second cluster IDs: {len(merged_second_cluster_ids)}")
 
-# def gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
-#     print("Outputting gene_presence_absence file")
-#     output_dir = os.path.abspath(options.output_dir)
-#     #in_name = options.clusters.split('.')[0].split('/')[-1]
-#     gpa_outfile = os.path.join(output_dir, 'gene_presence_absence.csv')
-#     gpa_outfile = open(gpa_outfile, 'w')
-#     genome_dict = OrderedDict(sorted(genome_dict.items()))
-#     gpa_outfile.write('"Gene","Non-unique Gene name","Annotation","No. isolates","No. sequences","Avg sequences per isolate","Genome Fragment","Order within Fragment",'
-#                      '"Accessory Fragment","Accessory Order with Fragment","QC","Min group size nuc","Max group size nuc","Avg group size nuc","')
-#     gpa_outfile.write('","'.join(genome_dict.keys()))
-#     gpa_outfile.write('"\n')
-#     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
-#         average_sequences_per_genome = len(sequences) / len(pangenome_clusters_First_sorted[cluster])
-#         gpa_outfile.write('"group_'+str(cluster)+'","","","'+str(len(pangenome_clusters_First_sorted[cluster]))+'","'+str(len(sequences))+'","'+str(average_sequences_per_genome)+
-#                          '","","","","","","","",""')
-#
-#
-#         for genome in genome_dict.keys():
-#             full_out = ''
-#             tmp_list = []
-#             for value in sequences:
-#                 if value.split('|')[0] == genome:
-#                     tmp_list.append(value.split('|')[1])
-#             if tmp_list:
-#                 full_out += ',"'+'  '.join(tmp_list)+'"'
-#             else:
-#                 full_out = ',""'
-#             gpa_outfile.write(full_out)
-#         gpa_outfile.write('\n')
-
-### Below is some unfinished code
-    # edge_list_outfile = open(in_name+'_edge_list.csv','w')
-    # for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
-    #     output = []
-    #     for entry in sequences:
-    #         # Split each entry at '|'
-    #         genome, gene = entry.split('|')
-    #         # Format the result as "gene  genome"
-    #         output.append(f"{gene}\t{genome}")
-    #     for line in output:
-    #         edge_list_outfile.write(line + '\n')
-
 
 
 
@@ -209,7 +167,7 @@ def get_cores(options,genome_dict):
             cores[only_second_core_group] = []
     return cores, groups
 
-#@profile
+
 def calc_First_only_core(cluster, First_num, groups, cores):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= int(First_num) <= fir):
@@ -217,7 +175,7 @@ def calc_First_only_core(cluster, First_num, groups, cores):
     family_group = list(groups)[res]
     cores['First_core_'+family_group].append(cluster)
 
-#@profile
+
 def calc_single_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count gene families extended with StORFs
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= First_num+Second_num <= fir):
@@ -227,7 +185,7 @@ def calc_single_First_extended_Second_only_core(cluster, First_num, groups, core
     cores['extended_core_' + family_group].append(cluster)
 
 
-#@profile
+
 def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count seperately those gene families extended with StORF-Reporter but combined >1 PEP
     groups_as_list = list(groups.values())
     # Looping through the list to find the matching condition
@@ -239,7 +197,7 @@ def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores
     cores['combined_core_' + family_group].append(cluster)
 
 
-#@profile
+
 def calc_Second_only_core(cluster, Second_num, groups, cores):
     groups_as_list = list(groups.values())
     for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= Second_num <= fir):
@@ -247,7 +205,7 @@ def calc_Second_only_core(cluster, Second_num, groups, cores):
     family_group = list(groups)[res]
     cores['Second_core_' + family_group].append(cluster)
 
-#@profile
+
 def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count the true storf onlies
     try:
         groups_as_list = list(groups.values())
@@ -259,7 +217,7 @@ def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count
         sys.exit("Error in calc_only_Second_only_core")
 
 
-#@profile
+
 def cluster(options):
 
     if options.cluster_format == 'CD-HIT':
@@ -273,18 +231,17 @@ def cluster(options):
     cores, groups = get_cores(options, genome_dict)
     ###
 
-    if options.reclustered != None: #FIX
+    if options.reclustered != None: # Combined clustering
         if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genome_dict, '|')
         elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
-            #Fix
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences  = combined_clustering_Edge_List(options, '|')
 
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences,  '|')
 
         # Sort First clusters
         sorted_First_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
-        pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
+        #pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences, sorted_First_keys)
         pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type, sorted_First_keys)
 
@@ -296,7 +253,7 @@ def cluster(options):
     else:
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
         sorted_First_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
-        pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
+        #pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences,
                                                                          sorted_First_keys)
         pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type, sorted_First_keys)
@@ -375,17 +332,16 @@ def cluster(options):
     if options.gene_presence_absence_out != False:
         if options.reclustered != None:
             # Pass both First and Second clustering data
-            gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted,
+            gene_presence_absence_output(options, genome_dict,
                                          pangenome_clusters_First_sequences_sorted,
                                          combined_pangenome_clusters_First_Second_clustered,
                                          combined_pangenome_clusters_Second_sequences_sorted)
         else:
             # Only First clustering data available
-            gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sorted,
-                                         pangenome_clusters_First_sequences_sorted)
+            gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sequences_sorted)
 
 
-    ###Need to fix this below. If full/partial the ifs need to be different. If full we first need to output the gfs then align. if -wruite-groups not presented then it needs
+    ###Need to fix this below. If full/partial the ifs need to be different. If full we first need to output the gfs then align. if -write-groups not presented then it needs
     # to be done for alignment full anyway...
 
     genome_list = list(genome_dict.keys())
@@ -400,16 +356,23 @@ def cluster(options):
                 outfile.write('>group_'+str(cluster)+'\n')
                 wrapped_aa_seq = wrap_sequence(sequences[ids[0]], 60)
                 outfile.write(wrapped_aa_seq+'\n')
-        if options.write_groups != None:
+        if options.write_groups != False:
             print("Outputting gene group FASTA files")
             #output_dir = os.path.dirname(os.path.abspath(options.output_dir))
             output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
             write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
-            if options.align_core != None:
+            if options.align_core != False:
                 print("Processing gene group alignment")
                 process_gene_groups(options, output_dir, None, None, genome_list, 'core_gene_alignment.aln')
+
+        if options.write_individual_groups == True:
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_individual_groups(options, output_dir, key_order, cores, sequences,
+                                        pangenome_clusters_First_sequences_sorted,
+                                        combined_pangenome_clusters_Second_sequences)
+
 
     elif options.run_mode == 'Partial':
         sequences = read_fasta(options.fasta)
@@ -432,16 +395,21 @@ def cluster(options):
                 outfile.write('>group_'+str(cluster)+'\n')
                 wrapped_aa_seq = wrap_sequence(sequences[ids[0]], 60)
                 outfile.write(wrapped_aa_seq+'\n')
-        if options.write_groups != None:
+        if options.write_groups != False:
             print("Outputting gene group FASTA files")
             output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
             write_groups_func(options,output_dir, key_order, cores, sequences,
                          pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences)
 
-            if options.align_core != None:
+            if options.align_core != False:
                 print("Processing gene group alignment")
                 process_gene_groups(options, output_dir, None, None, genome_list, 'core_gene_alignment.aln')
 
+        if options.write_individual_groups == True:
+            output_dir = os.path.join(options.output_dir, 'Gene_Groups_Output')
+            write_individual_groups(options, output_dir, key_order, cores, sequences,
+                                        pangenome_clusters_First_sequences_sorted,
+                                        combined_pangenome_clusters_Second_sequences)
 
 
         #
@@ -461,4 +429,3 @@ def cluster(options):
     #
     #
     #
-

@@ -1,6 +1,5 @@
-
-import argparse
 from collections import defaultdict, OrderedDict
+import sys
 
 
 try:
@@ -11,6 +10,7 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from utils import *
 
 def run_cd_hit(options, input_file, clustering_output, clustering_mode):
+    logger = logging.getLogger("PyamilySeq.Group_Splitter")
     cdhit_command = [
         clustering_mode,
         '-i', input_file,
@@ -24,12 +24,17 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-sc', "1",
         '-sf', "1"
     ]
-    if options.verbose == True:
-        subprocess.run(cdhit_command)
-    else:
-        subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    logger.debug("Group-Splitter CD-HIT command: %s", " ".join(cdhit_command))
+    try:
+        if options.verbose:
+            subprocess.run(cdhit_command)
+        else:
+            subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        logger.info("CD-HIT completed for %s", input_file)
+    except Exception:
+        logger.exception("Error running CD-HIT for %s", input_file)
 
-#'@profile
+
 def calculate_new_rep_seq(cluster_data, length_weight=1.0, identity_weight=1.0):
     total_length = sum(entry['length'] for entry in cluster_data)
     avg_length = total_length / len(cluster_data)
@@ -75,7 +80,27 @@ def read_fasta_groups(options, groups_to_use):
     else:
         affix = '_dna.fasta'
 
-    combined_groups_fasta = options.input_directory + '/Gene_Groups_Output/combined_group_sequences' + affix
+    # Ensure we look for the combined file that includes the requested group level (e.g. "99")
+    # groups_to_use[1] contains the numeric group level when using ('groups', <num>)
+    group_level = str(groups_to_use[1]) if groups_to_use and len(groups_to_use) > 1 else ''
+    combined_groups_fasta = os.path.join(options.input_directory, 'Gene_Groups_Output',
+                                         f"combined_group_sequences_{group_level}{affix}")
+
+    # Defensive check: combined_group_sequences_* file must exist (was created by PyamilySeq with -write_groups)
+    if not os.path.exists(combined_groups_fasta):
+        logger = logging.getLogger("PyamilySeq.Group_Splitter")
+        logger.error("Required combined group sequences file not found: %s", combined_groups_fasta)
+        logger.error("This usually means the upstream PyamilySeq run did not include the -write_groups and -write_individual_groups options.")
+        # Helpful debug info: list contents of Gene_Groups_Output if available
+        parent_dir = os.path.dirname(combined_groups_fasta)
+        if os.path.isdir(parent_dir):
+            try:
+                files = os.listdir(parent_dir)
+                logger.debug("Files in %s: %s", parent_dir, ", ".join(sorted(files)) if files else "(none)")
+            except Exception as e:
+                logger.debug("Could not list %s: %s", parent_dir, e)
+        # Stop further processing
+        sys.exit(1)
 
     if groups_to_use[0] == 'ids':
         selected_group_ids = [int(g.strip()) for g in groups_to_use[1].split(',')]
@@ -334,13 +359,16 @@ def separate_groups(options, clustering_mode, groups_to_use):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='PyamilySeq ' + PyamilySeq_Version + ': Group-Splitter - A tool to split multi-copy gene groups identified by PyamilySeq.')
+    # Early console-only logger so parser.description is emitted via logger before argparse prints usage/help.
+    early_logger = configure_logger("PyamilySeq.Group_Splitter", enable_file=False, log_dir=None, verbose=False)
+    # Use LoggingArgumentParser so usage/errors are emitted via the configured logger
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.Group_Splitter", description='Group-Splitter - A tool to split multi-copy gene groups identified by PyamilySeq.')
     ### Required Arguments
     required = parser.add_argument_group('Required Parameters')
-    required.add_argument('-input_directory', action='store', dest='input_directory',
+    required.add_argument('-input_dir', action='store', dest='input_directory',
                           help='Provide the directory of a PyamilySeq run.',
                           required=True)
-    required.add_argument('-sequence_type', action='store', dest='sequence_type', default='AA',choices=['AA', 'DNA'],
+    required.add_argument('-seq_type', action='store', dest='sequence_type', default='AA',choices=['AA', 'DNA'],
                           help='Default - AA: Are groups "DNA" or "AA" sequences?',
                           required=True)
     required.add_argument('-genome_num', action='store', dest='genome_num', type=int,
@@ -350,7 +378,7 @@ def main():
 
     ### Regrouping Arguments
     regrouping_params = parser.add_argument_group('Regrouping Parameters')
-    regrouping_params.add_argument('-groups', action="store", dest='groups', type=int, default=None,
+    regrouping_params.add_argument('-groups', action="store", dest='groups', type=int, default=99,
                           help='Default - 99: groups to be split by pangenome grouping (see -group_threshold). '
                                'Provide "-groups 99" to split specific groups.',
                           required=False)
@@ -403,10 +431,14 @@ def main():
                       help="Print out version number and exit")
 
 
+    # Optional file logging flags (must be added before parsing)
+    parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
+    parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: input_directory).")
     options = parser.parse_args()
-    print("Running PyamilySeq: Group-Splitter " + PyamilySeq_Version)
-
-
+    # Compute logfile directory (default to input_directory) and only enable file logging when --log is provided.
+    log_dir = options.log_dir if getattr(options, "log_dir", None) else os.path.abspath(options.input_directory)
+    logger = configure_logger("PyamilySeq.Group_Splitter", enable_file=getattr(options, "log", False), log_dir=log_dir, verbose=options.verbose)
+    logger.info("Running Group-Splitter %s", PyamilySeq_Version)
 
     ###External tool checks:
     ##MAFFT
@@ -416,11 +448,10 @@ def main():
                 print("mafft is installed. Proceeding with alignment.")
         else:
             exit("mafft is not installed. Please install mafft to proceed.")
-    ##CD-HIT
 
+    ##CD-HIT
     if is_tool_installed('cd-hit'):
-        if options.verbose == True:
-            print("cd-hit is installed. Proceeding with clustering.")
+        logger.info("cd-hit is installed. Proceeding with clustering.")
         if options.sequence_type == 'DNA':
             clustering_mode = 'cd-hit-est'
         else:
@@ -434,6 +465,7 @@ def main():
             if options.verbose == True:
                 print("Running CD-HIT in slow mode.")
     else:
+        logger.error("cd-hit is not installed. Please install cd-hit to proceed.")
         exit("cd-hit is not installed. Please install cd-hit to proceed.")
 
     ##Alignment
@@ -451,6 +483,9 @@ def main():
     if not os.path.exists(sub_groups_output):
         os.makedirs(sub_groups_output)
 
+    logger.info("Gene groups output: %s", gene_groups_output)
+    logger.info("Sub groups output: %s", sub_groups_output)
+
     ## Get Summary Stats
     summary_file = os.path.join(options.input_directory, 'summary_statistics.txt')
 
@@ -459,10 +494,9 @@ def main():
     with open(params_out, "w") as outfile:
         for arg, value in vars(options).items():
             outfile.write(f"{arg}: {value}\n")
+    logger.info("Saved parameters to %s", params_out)
 
-
-
-    ## Group Selction - FIX THIS - currently fails if either are not provided
+    ## Group Selection - FIX THIS - currently fails if either are not provided
     if options.groups != None and options.group_ids != None:
         sys.exit('Must provide "-group_ids" or "-groups", not both.')
     elif options.group_ids != None:
@@ -475,12 +509,9 @@ def main():
 
 
     paralog_groups = separate_groups(options, clustering_mode, groups_to_use)
-    ###
-    # Print metrics about paralog groups
-    print(f"Identified {len(paralog_groups)} paralog groups:")
+    logger.info("Identified %d paralog groups", len(paralog_groups))
     for group_id, data in paralog_groups.items():
-        print(f"Group ID: {group_id}, Number of new groups: {data['count']}, Sizes: {data['sizes']}")
-    ###
+        logger.debug("Group %s -> new groups: %s sizes: %s", group_id, data['count'], data['sizes'])
 
 
     # Read summary statistics
@@ -509,8 +540,37 @@ def main():
     # Recalculate each *_core_* value
     for group_id, data in paralog_groups.items():
         group_id = group_id.replace('>Group_', '')
-        original_group = next((f for f in os.listdir(gene_groups_output) if f.endswith(f'_{group_id}.fasta')), None)
-        original_group = int(original_group.split('_')[2])
+        # Find the original group filename in gene_groups_output that:
+        #  - contains the requested group level (options.groups, e.g. '99')
+        #  - corresponds to this subgroup id (group_id)
+        original_group = None
+        for fname in os.listdir(gene_groups_output):
+            if not fname.endswith('.fasta'):
+                continue
+            # Require the filename to include the group level token (e.g., '_99_') to avoid false matches
+            if f"_{options.groups}_" not in fname:
+                continue
+            # Accept filenames that end with _<group_id>.fasta or _<group_id>_dna.fasta/_aa.fasta
+            if fname.endswith(f"_{group_id}.fasta") or fname.endswith(f"_{group_id}_dna.fasta") or fname.endswith(f"_{group_id}_aa.fasta"):
+                original_group = fname
+                break
+        if original_group is None:
+            # fallback: attempt a looser match (preserve previous behavior)
+            for fname in os.listdir(gene_groups_output):
+                if fname.endswith(f"_{group_id}.fasta") or fname.endswith(f"_{group_id}_dna.fasta") or fname.endswith(f"_{group_id}_aa.fasta"):
+                    original_group = fname
+                    break
+        if original_group is None:
+            # If still not found, skip recalculation for this paralog group
+            logger.warning("Could not find original group file for subgroup id %s in %s", group_id, gene_groups_output)
+            continue
+        # Extract the core-group number from the filename (expected at index 2: First_core_99_3_dna.fasta)
+        try:
+            original_group_num = int(original_group.split('_')[2])
+        except Exception:
+            logger.warning("Unexpected filename format for %s; skipping", original_group)
+            continue
+        original_group = original_group_num
         if original_group == 99:
             new_core_99 -= 1
         elif original_group == 95:
@@ -554,7 +614,7 @@ def main():
 
     # Alignment
     if options.align_core != None:
-        print("\n\nProcessing gene group alignment")
+        logger.info("Processing gene group alignment")
         group_directory = options.gene_groups_output
         sub_group_directory = options.sub_groups_output
         genome_list = read_genomes_from_fasta(options.gene_groups_output + '/combined_group_sequences_dna.fasta')

@@ -1,6 +1,12 @@
-import argparse
 import os
 import csv
+import logging
+
+# Use centralissed logger factory from constants
+try:
+    from .constants import configure_logger, LoggingArgumentParser
+except Exception:
+    from constants import configure_logger, LoggingArgumentParser
 
 
 def parse_fasta(fasta_file):
@@ -43,9 +49,8 @@ def parse_csv(csv_file):
 
 
 def write_group_fastas(groups, sequences, output_dir):
-    """
-    Writes individual FASTA files for each group with the relevant sequences.
-    """
+
+    logger = logging.getLogger("PyamilySeq.Group_Extractor")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -56,27 +61,39 @@ def write_group_fastas(groups, sequences, output_dir):
                 if gene_id in sequences:
                     f.write(f">{gene_id}\n{sequences[gene_id]}\n")
                 else:
-                    print(f"Warning: Gene ID {gene_id} not found in FASTA file.")
+                    logger.warning("Warning: Gene ID %s not found in FASTA file.", gene_id)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Process FASTA and CSV files to create grouped FASTA outputs.")
+    # Early console-only logger so the parser description is logged before argparse outputs.
+    early_logger = configure_logger("PyamilySeq.Group_Extractor", enable_file=False, log_dir=None, verbose=False)
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.Group_Extractor", description="Running Group-Extractor - A tool to process FASTA and CSV files to create grouped FASTA outputs.")
+
     parser.add_argument("-fasta", required=True, help="Input FASTA file containing gene sequences.")
     parser.add_argument("-csv", required=True, help="Input CSV file containing group and gene information.")
     parser.add_argument("-output_dir", required=True, help="Directory to save the grouped FASTA files.")
+    parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
+    parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: output_dir).")
 
     args = parser.parse_args()
 
-    # Parse the input files
-    print("Parsing FASTA file...")
-    sequences = parse_fasta(args.fasta)
-    print("Parsing CSV file...")
-    groups = parse_csv(args.csv)
+    # Setup logger writing to output_dir (optional file)
+    log_dir = os.path.abspath(args.output_dir) if args.output_dir else os.getcwd()
+    if hasattr(args, "log_dir") and args.log_dir:
+        log_dir = args.log_dir
+    # Only create a logfile when --log is provided; default is console (stdout) only.
+    logger = configure_logger("PyamilySeq.Group_Extractor", enable_file=getattr(args, "log", False), log_dir=log_dir, verbose=False)
 
-    # Write the grouped FASTA files
-    print("Writing grouped FASTA files...")
+    logger.info("Parsing FASTA file: %s", args.fasta)
+    sequences = parse_fasta(args.fasta)
+    logger.info("Parsed %d sequences.", len(sequences))
+    logger.info("Parsing CSV file: %s", args.csv)
+    groups = parse_csv(args.csv)
+    logger.info("Parsed %d groups.", len(groups))
+
+    logger.info("Writing grouped FASTA files to %s", args.output_dir)
     write_group_fastas(groups, sequences, args.output_dir)
-    print("Process completed successfully.")
+    logger.info("Process completed successfully.")
 
 
 if __name__ == "__main__":

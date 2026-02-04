@@ -7,6 +7,25 @@ from tempfile import NamedTemporaryFile
 import sys
 import re
 import math
+import logging
+
+logger = logging.getLogger("PyamilySeq")  # Use the shared top-level PyamilySeq logger so all utils logs propagate to the same handlers
+
+_startup_messages_pending = []
+
+
+def emit_pending_startup_messages():
+    global _startup_messages_pending
+    if _startup_messages_pending:
+        try:
+            for msg in _startup_messages_pending:
+                try:
+                    logger.info("%s", msg)
+                except Exception:
+                    # swallow any logging errors to avoid breaking flow
+                    pass
+        finally:
+            _startup_messages_pending.clear()
 
 ####
 # Placeholder for the distance function
@@ -18,7 +37,8 @@ try:
     def levenshtein_distance_calc(seq1, seq2):
         return LV.distance(seq1, seq2)
 except (ModuleNotFoundError, ImportError):
-    print("Levenshtein package not installed - Will fallback to slower Python implementation.")
+    # Save the notice for later emission (after logger handlers are configured)
+    _startup_messages_pending.append("Levenshtein package not installed - Will fallback to slower Python implementation.")
     # Fallback implementation
     def levenshtein_distance_calc(seq1, seq2):
         # Slower Python implementation of Levenshtein distance
@@ -62,6 +82,11 @@ codon_table = {
       'TAC':'Y', 'TAT':'Y', 'TAA':'*', 'TAG':'*',
       'TGC':'C', 'TGT':'C', 'TGA':'*', 'TGG':'W'}
 
+# Temp fix
+codon_table['TAA'] = ''
+codon_table['TGA'] = ''
+codon_table['TAG'] = ''
+
 def translate_frame(sequence):
     translate = ''.join([codon_table.get(sequence[3 * i:3 * i + 3], 'X') for i in range(len(sequence) // 3)])
     return translate
@@ -94,9 +119,14 @@ def translate_dna_to_aa(dna_fasta, aa_fasta):
 
 
 def detect_sequence_type(fasta_file):
-    with open(fasta_file, 'r') as f:
+    import gzip
+    opener = gzip.open if str(fasta_file).lower().endswith('.gz') else open
+    with opener(fasta_file, 'rt') as f:
         for line in f:
             if line.startswith('>'):
+                continue
+            line = line.strip().upper()
+            if not line:
                 continue
             if any(base in line for base in 'EFILPQZ'):
                 return False  # Contains amino acids
@@ -105,7 +135,6 @@ def detect_sequence_type(fasta_file):
 
 def is_tool_installed(tool_name):
     """Check if a tool is installed and available in PATH."""
-    # Check if the tool is in the system PATH
     if shutil.which(tool_name) is None:
         return False
 
@@ -119,7 +148,9 @@ def is_tool_installed(tool_name):
         return False  # This shouldn't happen due to the earlier check
 
 def reverse_complement(seq):
-    complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N'}
+    complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N','R': 'Y',
+                  'Y': 'R', 'S': 'S', 'W': 'W', 'K': 'M', 'M': 'K', 'V': 'B',
+                  'B': 'V', 'H': 'D', 'D': 'H'}
     return ''.join(complement[base] for base in reversed(seq))
 
 
@@ -196,8 +227,8 @@ def select_longest_gene(sequences, subgrouped):
 
 
 def run_mafft_on_sequences(options, sequences, output_file):
-    #print("Conducting MAFFT alignment.")
     """Run mafft on the given sequences and write to output file."""
+    emit_pending_startup_messages()
     # Create a temporary input file for mafft
     with NamedTemporaryFile('w', delete=False) as temp_input_file:
         for header, sequence in sequences.items():
@@ -207,14 +238,13 @@ def run_mafft_on_sequences(options, sequences, output_file):
     # Run mafft
     try:
         with open(output_file, 'w') as output_f:
-            if options.verbose == True:
+            if getattr(options, "verbose", False):
                 subprocess.run(
                     ['mafft', '--auto', '--thread', str(options.threads), temp_input_file_path],
                     stdout=output_f,
                     stderr=sys.stderr,
                     check=True
                 )
-
             else:
                 subprocess.run(
                     ['mafft', '--auto', '--thread', str(options.threads), temp_input_file_path],
@@ -223,22 +253,28 @@ def run_mafft_on_sequences(options, sequences, output_file):
                     check=True
                 )
     finally:
-        os.remove(temp_input_file_path)  # Clean up the temporary file
-
+        try:
+            os.remove(temp_input_file_path)  # Clean up the temporary file
+        except Exception:
+            pass
 
 
 
 def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident, combined_out, translate, run_as_combiner):
+    emit_pending_startup_messages()
     if run_as_combiner == True:
-        combined_out_file_aa = None
+     combined_out_file_aa_path = None
     else:
-        combined_out_file_aa = combined_out.replace('_dna.fasta','_aa.fasta')
+     combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
 
-    with open(combined_out, 'w') as combined_out_file, (open(combined_out_file_aa, 'w') if combined_out_file_aa else open(os.devnull, 'w')) as combined_out_file_aa:
+    # Open actual AA file or os.devnull based on whether we need an AA file path
+    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
+    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
         paired_files_found = None
     #with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
         gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff))
         if not gff_files:
+            logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split_gff)
             sys.exit("Error: No GFF files found.")
         for gff_file in gff_files:
             genome_name = os.path.basename(gff_file).split(name_split_gff)[0]
@@ -251,12 +287,12 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
                         corresponding_fasta_file = temp_file
                         break
                 if corresponding_fasta_file is None:
-                    print("Corresponding FASTA file for GFF file '" + gff_file + "' not found. Skipping. - Try using the -name_split_fasta option.")
+                    logger.warning("Corresponding FASTA file for GFF file '%s' not found. Skipping. Try using the -name_split_fasta option.", gff_file)
                     continue
             else:
                 corresponding_fasta_file = os.path.join(input_dir, genome_name + name_split_fasta)
                 if not os.path.exists(corresponding_fasta_file):
-                    print("Corresponding FASTA file for GFF file '" + gff_file + "' not found. Skipping. - Try using the -name_split_fasta option.")
+                    logger.warning("Corresponding FASTA file for GFF file '%s' not found: expected '%s'. Skipping. Try using the -name_split_fasta option.", gff_file, corresponding_fasta_file)
                     continue
 
             gff_features = []
@@ -322,25 +358,30 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
                             combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
     if not paired_files_found:
+        logger.error("Could not find matching GFF/FASTA files. Please check input directory and -name_split_gff / -name_split_fasta parameters.")
         sys.exit("Could not find matching GFF/FASTA files - Please check input directory and -name_split_gff and -name_split_fasta parameters.")
     if translate == False or translate == None:
-        #Clean up unused file
-        try: # Catches is combined_out_file_aa is None
-            if combined_out_file.name != combined_out_file_aa.name:
-                os.remove(combined_out_file_aa.name)
-        except AttributeError:
-            pass
+        # Clean up unused file only if it was a real file we created (never remove os.devnull)
+        if combined_out_file_aa_path:
+            try:
+                if os.path.exists(combined_out_file_aa_path):
+                    os.remove(combined_out_file_aa_path)
+            except Exception:
+                pass
 
 
 def read_combined_files(input_dir, name_split, gene_ident, combined_out, translate, run_as_combiner):
+    emit_pending_startup_messages()
     if run_as_combiner == True:
-        combined_out_file_aa = None
+        combined_out_file_aa_path = None
     else:
-        combined_out_file_aa = combined_out.replace('_dna.fasta','_aa.fasta')
-    #with open(combined_out, 'w') as combined_out_file, open(combined_out_file_aa, 'w') if combined_out_file_aa else open(os.devnull, 'w'):
-    with open(combined_out, 'w') as combined_out_file, (open(combined_out_file_aa, 'w') if combined_out_file_aa else open(os.devnull, 'w')) as combined_out_file_aa:
+        combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
+
+    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
+    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
         gff_files = glob.glob(os.path.join(input_dir, '*' + name_split))
         if not gff_files:
+            logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split)
             sys.exit("Error: No GFF files found - check input directory and -name_split_gff parameter.")
         for gff_file in gff_files:
             genome_name = os.path.basename(gff_file).split(name_split)[0]
@@ -409,24 +450,29 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
                                 combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
     if translate == False or translate == None:
-        #Clean up unused file
-        try: # Catches is combined_out_file_aa is None
-            if combined_out_file.name != combined_out_file_aa.name:
-                os.remove(combined_out_file_aa.name)
-        except AttributeError:
-            pass
+        # Clean up unused file only if it was a real file we created (never remove os.devnull)
+        if combined_out_file_aa_path:
+            try:
+                if os.path.exists(combined_out_file_aa_path):
+                    os.remove(combined_out_file_aa_path)
+            except Exception:
+                pass
 
 
 
 def read_fasta_files(input_dir, name_split_fasta, combined_out, translate, run_as_combiner):
+    emit_pending_startup_messages()
     if run_as_combiner == True:
-        combined_out_file_aa = None
+     combined_out_file_aa_path = None
     else:
-        combined_out_file_aa = combined_out.replace('_dna.fasta','_aa.fasta')
-    with open(combined_out, 'w') as combined_out_file, (open(combined_out_file_aa, 'w') if combined_out_file_aa else open(os.devnull, 'w')) as combined_out_file_aa:
+     combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
+
+    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
+    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
         fasta_files = glob.glob(os.path.join(input_dir, '*' + name_split_fasta))
         if not fasta_files:
-            sys.exit("Error: No GFF files found.")
+            logger.error("Error: No FASTA files found in %s (pattern: *%s).", input_dir, name_split_fasta)
+            sys.exit("Error: No FASTA files found.")
         for fasta_file in fasta_files:
             genome_name = os.path.basename(fasta_file).split(name_split_fasta)[0]
             fasta_dict = collections.defaultdict(str)
@@ -456,31 +502,63 @@ def read_fasta_files(input_dir, name_split_fasta, combined_out, translate, run_a
                         combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
 
     if translate == False or translate == None:
-        #Clean up unused file
-        try: # Catches is combined_out_file_aa is None
-            if combined_out_file.name != combined_out_file_aa.name:
-                os.remove(combined_out_file_aa.name)
-        except AttributeError:
-            pass
+        # Clean up unused file only if it was a real file we created (never remove os.devnull)
+        if combined_out_file_aa_path:
+            try:
+                if os.path.exists(combined_out_file_aa_path):
+                    os.remove(combined_out_file_aa_path)
+            except Exception:
+                pass
 
+def write_individual_groups(options, output_dir, key_order, cores, sequences,
+                            pangenome_clusters_First_sequences_sorted,
+                            combined_pangenome_clusters_Second_sequences):
+    if not getattr(options, "write_individual_groups", False):
+        return
+
+    os.makedirs(output_dir, exist_ok=True)
+
+
+    for key_prefix in key_order:
+        for key, values in cores.items():
+            if not key.startswith(key_prefix):
+                continue
+
+            for value in values:
+                sequences_to_write = (pangenome_clusters_First_sequences_sorted[value]
+                                      if 'First' in key_prefix
+                                      else combined_pangenome_clusters_Second_sequences[value])
+
+                dna_path = os.path.join(output_dir, f"{key}_{value}_dna.fasta")
+                aa_path = dna_path.replace('_dna.fasta', '_aa.fasta')
+
+                if getattr(options, "sequence_type", None) == 'AA':
+                    with open(dna_path, 'w') as dna_f, open(aa_path, 'w') as aa_f:
+                        for header in sequences_to_write:
+                            if header not in sequences:
+                                if getattr(options, "verbose", False):
+                                    print(f"Sequence {header} not found in original_fasta file.")
+                                continue
+                            seq = sequences[header]
+                            dna_f.write(f">{header}\n{wrap_sequence(seq)}\n")
+                            aa_f.write(f">{header}\n{wrap_sequence(translate_frame(seq))}\n")
+                else:
+                    with open(dna_path, 'w') as dna_f:
+                        for header in sequences_to_write:
+                            if header not in sequences:
+                                if getattr(options, "verbose", False):
+                                    print(f"Sequence {header} not found in original_fasta file.")
+                                continue
+                            seq = sequences[header]
+                            dna_f.write(f">{header}\n{wrap_sequence(seq)}\n")
 
 def write_groups_func(options, output_dir, key_order, cores, sequences,
                  pangenome_clusters_First_sequences_sorted, combined_pangenome_clusters_Second_sequences):
-    """
-    Writes individual FASTA files and a combined FASTA file for all sequences.
 
-    Parameters:
-    - options: Command-line options.
-    - output_dir: Directory where output FASTA files will be saved.
-    - key_order: The order in which to process keys.
-    - cores: Dictionary of core genes.
-    - sequences: Dictionary mapping headers to sequences.
-    - pangenome_clusters_First_sequences_sorted: Dictionary of first sequence clusters.
-    - combined_pangenome_clusters_Second_sequences: Dictionary of second sequence clusters.
-    """
+    emit_pending_startup_messages()
     # Create output directory if it doesn't exist
     if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+     os.makedirs(output_dir)
 
     for group in options.write_groups.split(','):
 
@@ -514,7 +592,10 @@ def write_groups_func(options, output_dir, key_order, cores, sequences,
                                                     outfile_aa.write(f">{header}\n")
                                                     outfile_aa.write(f"{wrapped_sequence_aa}\n")
                                                 else:
-                                                    os.remove(outfile_aa.name)  # Delete individual file if option is disabled
+                                                    try:
+                                                        os.remove(outfile_aa.name)  # Delete individual file if option is disabled
+                                                    except FileNotFoundError:
+                                                        pass
                                                 # Always write to the combined AA file
                                                 combined_fasta_aa.write(f">Group_{value}|{header}\n")
                                                 combined_fasta_aa.write(f"{wrapped_sequence_aa}\n")
@@ -530,18 +611,24 @@ def write_groups_func(options, output_dir, key_order, cores, sequences,
                                                 outfile.write(f">{header}\n")
                                                 outfile.write(f"{wrapped_sequence}\n")
                                             else:
-                                                os.remove(outfile.name)  # Delete individual file if option is disabled
+                                                try:
+                                                    os.remove(outfile.name)  # Delete individual file if option is disabled
+                                                except FileNotFoundError:
+                                                    pass
                                             # Always write to the combined nucleotide file
                                             combined_fasta.write(f">Group_{value}|{header}\n")
                                             combined_fasta.write(f"{wrapped_sequence}\n")
 
                                         else:
                                             if options.verbose == True:
-                                                print(f"Sequence {header} not found in original_fasta file.")
+                                                logger.info("Sequence " + header + " not found in original_fasta file.")
         if options.sequence_type != 'AA':
             #Clean up unused file
-            os.remove(combined_fasta_aa.name)
-    print(f"Combined FASTA file saved to: {combined_fasta_filename}")
+            try:
+                os.remove(combined_fasta_aa.name)
+            except FileNotFoundError:
+                pass
+    logger.info("Combined FASTA file saved to: " + combined_fasta_filename)
 
 
 # def process_gene_groups(options, group_directory, sub_group_directory, paralog_groups, output_file):
@@ -612,38 +699,38 @@ def perform_alignment(gene_path,group_directory, gene_file, options, concatenate
     return concatenated_sequences
 
 def process_gene_groups(options, group_directory, sub_group_directory, paralog_groups, genome_list, output_file):
+    emit_pending_startup_messages()
     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
     concatenated_sequences = {genome: "" for genome in genome_list}
     output_file = group_directory.replace('Gene_Groups_Output', output_file)
     if paralog_groups != None:
-        threshold_size = math.floor(int(options.align_core) * int(options.genome_num) / 100)
+     threshold_size = math.floor(int(options.align_core) * int(options.genome_num) / 100)
 
     if options.align_aa == True:
-        affix = '_aa.fasta'
+     affix = '_aa.fasta'
     else:
-        affix = '_dna.fasta'
+     affix = '_dna.fasta'
 
     if options.align_core == True:
-        # Iterate over each gene family file
-        for gene_file in os.listdir(group_directory):
-            if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
-                current_group = int(gene_file.split('_')[3].split('.')[0])
-                gene_path = os.path.join(group_directory, gene_file)
-                # Could add more catches here to work with First and Secondary groups - This ensures only core '99/100' are aligned
-                if 'First_core_99' in gene_file or 'First_core_100' in gene_file:
-                    # Check for matching group in paralog_groups
-                    if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
-                        for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
-                            if size >= threshold_size:
-                                gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
-                                concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
-                    else:
-                        concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
+     # Iterate over each gene family file
+     for gene_file in os.listdir(group_directory):
+         if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
+             current_group = int(gene_file.split('_')[3].split('.')[0])
+             gene_path = os.path.join(group_directory, gene_file)
+             # Could add more catches here to work with First and Secondary groups - This ensures only core '99/100' are aligned
+             if 'First_core_99' in gene_file or 'First_core_100' in gene_file:
+                 # Check for matching group in paralog_groups
+                 if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
+                     for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
+                         if size >= threshold_size:
+                             gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
+                             concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
+                 else:
+                     concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
 
-    # Write the concatenated sequences to the output file
-    with open(output_file, 'w') as out:
-        for genome, sequence in concatenated_sequences.items():
-            out.write(f">{genome}\n")
-            wrapped_sequence = wrap_sequence(sequence, 60)
-            out.write(f"{wrapped_sequence}\n")
-
+     # Write the concatenated sequences to the output file
+     with open(output_file, 'w') as out:
+         for genome, sequence in concatenated_sequences.items():
+             out.write(f">{genome}\n")
+             wrapped_sequence = wrap_sequence(sequence, 60)
+             out.write(f"{wrapped_sequence}\n")

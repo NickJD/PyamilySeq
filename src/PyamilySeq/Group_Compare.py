@@ -1,5 +1,12 @@
-import argparse
 from collections import defaultdict
+import logging
+import os
+
+# Use centralised logger factory from constants
+try:
+    from .constants import configure_logger, LoggingArgumentParser
+except Exception:
+    from constants import configure_logger, LoggingArgumentParser
 
 def read_cd_hit_output(clstr_file):
     """
@@ -23,10 +30,8 @@ def read_cd_hit_output(clstr_file):
     return seq_to_cluster
 
 def compare_cd_hit_clusters(file1, file2, output_file):
-    """
-    Compares two CD-HIT .clstr files to check if clusters are the same.
-    Writes the results to a TSV file.
-    """
+    logger = logging.getLogger("PyamilySeq.Group_Compare")
+    logger.info("Comparing clusters: %s vs %s", file1, file2)
     # Read both clustering files
     clusters1 = read_cd_hit_output(file1)
     clusters2 = read_cd_hit_output(file2)
@@ -80,12 +85,11 @@ def compare_cd_hit_clusters(file1, file2, output_file):
                     tsv_data.append([seq, cluster_id1, cluster_id2, "Cluster name change"])
 
     # Print metrics
-    print("🔢 Clustering Comparison Metrics:")
-    print(f"Cluster name changes: {cluster_name_changes}")
-    print(f"Sequence shifts (sequences assigned to different clusters): {sequence_shifts}")
-    print(f"Sequences only in the first file: {len(only_in_file1)}")
-    print(f"Sequences only in the second file: {len(only_in_file2)}")
-    print()
+    logger.info("Clustering Comparison Metrics:")
+    logger.info("Cluster name changes: %s", cluster_name_changes)
+    logger.info("Sequence shifts (sequences assigned to different clusters): %s", sequence_shifts)
+    logger.info("Sequences only in the first file: %s", len(only_in_file1))
+    logger.info("Sequences only in the second file: %s", len(only_in_file2))
 
     # Write the results to a TSV file
     with open(output_file, 'w') as out_file:
@@ -93,14 +97,24 @@ def compare_cd_hit_clusters(file1, file2, output_file):
         for row in tsv_data:
             out_file.write("\t".join(map(str, row)) + "\n")
 
-    print(f"✅ Results have been written to {output_file}")
+    logger.info("Results have been written to %s", output_file)
 
 def main():
-    parser = argparse.ArgumentParser(description="Compare two CD-HIT .clstr files to check for clustering consistency.")
+    # Early console-only logger so parser.description and argparse messages are emitted via logger
+    early_logger = configure_logger("PyamilySeq.Group_Compare", enable_file=False, log_dir=None, verbose=False)
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.Group_Compare", description="Running Group-Compare - A tool to compare two CD-HIT .clstr files to check for clustering consistency.")
+
     parser.add_argument("-file1", required=True, help="First CD-HIT .clstr file")
     parser.add_argument("-file2", required=True, help="Second CD-HIT .clstr file")
     parser.add_argument("-output", required=True, help="Output file (TSV format)")
+    parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
+    parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: same dir as -output).")
     args = parser.parse_args()
+
+    # Setup logger
+    out_dir = os.path.abspath(os.path.dirname(args.output)) if args.output else os.getcwd()
+    log_dir = args.log_dir if args.log_dir else out_dir
+    logger = configure_logger("PyamilySeq.Group_Compare", enable_file=args.log, log_dir=log_dir, verbose=False)
 
     compare_cd_hit_clusters(args.file1, args.file2, args.output)
 

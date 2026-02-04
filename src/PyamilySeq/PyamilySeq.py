@@ -1,6 +1,3 @@
-import argparse
-#from config import config_params
-
 try:
     from .PyamilySeq_Species import cluster as species_cluster
     from .PyamilySeq_Genus import cluster as genus_cluster
@@ -12,10 +9,11 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from constants import *
     from utils import *
 
-
-
+import traceback
+import sys
 
 def run_cd_hit(options, input_file, clustering_output, clustering_mode):
+    logger = logging.getLogger("PyamilySeq.PyamilySeq")
     cdhit_command = [
         clustering_mode,
         '-i', input_file,
@@ -29,14 +27,25 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-sc', "1",
         '-sf', "1"
     ]
-    if options.verbose == True:
-        subprocess.run(cdhit_command)
-    else:
-        subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    logger.debug("CD-HIT command: %s", " ".join(cdhit_command))
+    try:
+        if options.verbose:
+            ret = subprocess.run(cdhit_command)
+        else:
+            ret = subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if ret.returncode != 0:
+            logger.error("cd-hit returned non-zero exit code %s", ret.returncode)
+        else:
+            logger.info("cd-hit completed successfully: %s", clustering_output)
+    except Exception as e:
+        logger.exception("Failed to run cd-hit: %s", e)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=f"PyamilySeq {PyamilySeq_Version}: A tool for gene clustering and analysis.")
+    # Initial console-only logger so welcome and parser.description are logged before argparse outputs.
+    early_logger = configure_logger("PyamilySeq.PyamilySeq", enable_file=False, log_dir=None, verbose=False)
+    # Use LoggingArgumentParser so usage/errors are emitted via logger
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.PyamilySeq")#, description="PyamilySeq entrypoint")
 
     # Add subparsers for Full and Partial modes
     subparsers = parser.add_subparsers(dest="run_mode", required=True, help="Choose a mode: 'Full' or 'Partial'.")
@@ -109,28 +118,28 @@ def main():
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
                                  help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
 
-        # Miscellaneous Arguments
-        subparser.add_argument("-verbose", action="store_true",
-                            help="Print verbose output.")
-        subparser.add_argument("-v", "--version", action="version",
-                            version=f"PyamilySeq {PyamilySeq_Version}: Exiting.")
+    # Miscellaneous Arguments
+    # Global logging options (user controls logfile creation)
+    parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
+    parser.add_argument("--log-dir", dest="log_dir", default=None,
+                        help="Directory for logfile (default: output dir or cwd).")
+    parser.add_argument("-verbose", action="store_true",
+                        help="Print verbose output.")
+    parser.add_argument("-v", "--version", action="version",
+                        version=f"PyamilySeq {PyamilySeq_Version}: Exiting.")
 
     # Parse Arguments
     options = parser.parse_args()
-    ## Configuration
+
+    # Setup logger once we know output paths/options
+    # after we resolve output_path / options.output_dir:
+    resolved_log_dir = options.log_dir if getattr(options, "log_dir", None) else (os.path.abspath(options.output_dir) if getattr(options, "output_dir", None) else os.getcwd())
+    logger = configure_logger("PyamilySeq.PyamilySeq", enable_file=getattr(options, "log", False), log_dir=resolved_log_dir, verbose=options.verbose)
+    logger.info("Running PyamilySeq %s in %s mode", PyamilySeq_Version, getattr(options, "run_mode", "N/A"))
+    if options.verbose:
+        logger.debug("Options: %s", vars(options))
 
 
-    if options.write_groups != None and options.write_individual_groups == False:
-        options.write_individual_groups = True
-
-    # Example of conditional logic based on selected mode
-    print(f"Running PyamilySeq {PyamilySeq_Version} in {options.run_mode} mode:")
-    if options.run_mode == "Full" and options.verbose == True:
-        print("Processing Full mode with options:", vars(options))
-    elif options.run_mode == "Partial" and options.verbose == True:
-        print("Processing Partial mode with options:", vars(options))
-
-    ### Checking all required parameters are provided by user #!!# Doesn't seem to work
     if options.run_mode == 'Full':
         options.clustering_format = 'CD-HIT'
         if getattr(options, 'reclustered', None) is not None:
@@ -145,6 +154,7 @@ def main():
             missing_options = [opt for opt in
                                ['input_type', 'input_dir', 'name_split_gff', 'clustering_format', 'pident', 'len_diff'] if
                                not options.__dict__.get(opt)]
+            logger.error("Missing required options for Full mode: %s", ', '.join(missing_options))
             sys.exit(f"Missing required options for Full mode: {', '.join(missing_options)}")
         if options.align_core:
             options.write_individual_groups = True
@@ -176,33 +186,27 @@ def main():
     ##MAFFT
     if options.align_core == True:
         if is_tool_installed('mafft'):
-            if options.verbose == True:
-                print("mafft is installed. Proceeding with alignment.")
+            logger.info("mafft is installed. Proceeding with alignment.")
         else:
+            logger.error("mafft is not installed. Please install mafft to proceed.")
             exit("mafft is not installed. Please install mafft to proceed.")
     ##CD-HIT
     if options.run_mode == 'Full':
         if is_tool_installed('cd-hit'):
-            if options.verbose == True:
-                print("cd-hit is installed. Proceeding with clustering.")
+            logger.info("cd-hit is installed. Proceeding with clustering.")
             if options.sequence_type == 'DNA':
                 clustering_mode = 'cd-hit-est'
             elif options.sequence_type == 'AA':
                 clustering_mode = 'cd-hit'
             if options.fast_mode == True:
                 options.fast_mode = 1
-                if options.verbose == True:
-                    print("Running CD-HIT in fast mode.")
+                logger.info("Running CD-HIT in fast mode.")
             else:
                 options.fast_mode = 0
-                if options.verbose == True:
-                    print("Running CD-HIT in accurate mode.")
+                logger.info("Running CD-HIT in accurate mode.")
         else:
+            logger.error("cd-hit is not installed. Please install cd-hit to proceed.")
             exit("cd-hit is not installed. Please install cd-hit to proceed.")
-
-
-    # if options.write_groups != None and options.original_fasta == False:
-    #     exit("-fasta must br provided if -w is used")
 
     if hasattr(options, 'cluster_file') and options.cluster_file:
         options.cluster_file = fix_path(options.cluster_file)
@@ -308,10 +312,29 @@ def main():
 
 
     if options.group_mode == 'Species':
-        species_cluster(clustering_options)
+        try:
+            species_cluster(clustering_options)
+            logger.info("Invoked species clustering.")
+        except FileNotFoundError as e:
+            logger.error("File not found during species clustering: %s", e)
+            logger.debug("Traceback:\n%s", traceback.format_exc())
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Unexpected error during species clustering: %s", e)
+            logger.debug("Traceback:\n%s", traceback.format_exc())
+            sys.exit(1)
     elif options.group_mode == 'Genus':
-        genus_cluster((clustering_options))
-
+        try:
+            genus_cluster(clustering_options)
+            logger.info("Invoked genus clustering.")
+        except FileNotFoundError as e:
+            logger.error("File not found during genus clustering: %s", e)
+            logger.debug("Traceback:\n%s", traceback.format_exc())
+            sys.exit(1)
+        except Exception as e:
+            logger.error("Unexpected error during genus clustering: %s", e)
+            logger.debug("Traceback:\n%s", traceback.format_exc())
+            sys.exit(1)
 
     # Save arguments to a text file
     from datetime import datetime
@@ -319,9 +342,9 @@ def main():
         outfile.write(f"Timestamp: {datetime.now().isoformat()}\n")
         for arg, value in vars(options).items():
             outfile.write(f"{arg}: {value}\n")
+    logger.info("Saved parameters to %s", os.path.join(output_path, "PyamilySeq_params.txt"))
 
-    print("Thank you for using PyamilySeq -- A detailed user manual can be found at https://github.com/NickJD/PyamilySeq\n"
-          "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues\n#####")
+
 
 if __name__ == "__main__":
     main()
