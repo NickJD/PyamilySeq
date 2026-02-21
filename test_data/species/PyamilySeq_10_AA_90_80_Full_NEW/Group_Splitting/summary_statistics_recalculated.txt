@@ -1,0 +1,7 @@
+Number of Genomes: 10
+Recalculated Gene Groups
+First_core_99: 2994
+First_core_95: 0
+First_core_15: 3260
+First_core_0: 5474
+Total Number of First Gene Groups (Including Singletons): 11728

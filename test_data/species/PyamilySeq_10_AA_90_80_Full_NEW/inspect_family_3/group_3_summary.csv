@@ -1,0 +1,2 @@
+family_id,occurrences,genomes_with_family,median_relative_position,orientation_consistency,conserved_position_fraction,neighbor_conserved_fraction,neighbor_jaccard_mean
+group_3,32,10,0.6083312859989627,0.53125,0.0,0.09375,0.09375
