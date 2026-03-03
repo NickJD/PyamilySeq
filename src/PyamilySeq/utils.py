@@ -147,11 +147,19 @@ def is_tool_installed(tool_name):
     except FileNotFoundError:
         return False  # This shouldn't happen due to the earlier check
 
+_comp = str.maketrans(
+    "ATGCRYSWKMVBHDNatgcryswkmvbhdn-",
+    "TACGYRSWMKVBHDNtacgyrswmkvbhdn-"
+)
+
 def reverse_complement(seq):
-    complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N','R': 'Y',
-                  'Y': 'R', 'S': 'S', 'W': 'W', 'K': 'M', 'M': 'K', 'V': 'B',
-                  'B': 'V', 'H': 'D', 'D': 'H'}
-    return ''.join(complement[base] for base in reversed(seq))
+    return seq.translate(_comp)[::-1]
+
+# def reverse_complement(seq):
+#     complement = {'A': 'T', 'T': 'A', 'G': 'C', 'C': 'G', 'N': 'N','R': 'Y',
+#                   'Y': 'R', 'S': 'S', 'W': 'W', 'K': 'M', 'M': 'K', 'V': 'B',
+#                   'B': 'V', 'H': 'D', 'D': 'H'}
+#     return ''.join(complement[base] for base in reversed(seq))
 
 
 def fix_path(path):

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyamilySeq"
-version = "1.3.3"
+version = "1.3.4"
 authors = [
     {name = "Nicholas Dimonaco", email = "nicholas@dimonaco.co.uk"}
 ]
