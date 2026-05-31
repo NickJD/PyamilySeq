@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools", "wheel", "levenshtein"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyamilySeq"
-version = "1.3.4"
+version = "1.4.0"
 authors = [
     {name = "Nicholas Dimonaco", email = "nicholas@dimonaco.co.uk"}
 ]
@@ -19,7 +19,7 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-
+    "levenshtein>=0.27.3"
 ]
 
 [project.urls]

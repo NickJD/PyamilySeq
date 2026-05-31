@@ -7,6 +7,24 @@ from collections import Counter
 
 def cluster_CDHIT(options, splitter):
     First_in = open(options.clusters, 'r')
+    # Read file contents so we can validate format before parsing.
+    lines = First_in.read().splitlines()
+    First_in.close()
+    # Validate that this is a CD-HIT .clstr file. CD-HIT cluster files contain headers like:
+    #   >Cluster 0
+    # If the first '>' header looks like a FASTA header (e.g. '>genome_id...'), fail early with a helpful message.
+    header = None
+    for l in lines:
+        if not l:
+            continue
+        if l.startswith('>'):
+            header = l
+            break
+    if header is not None:
+        parts = header.split(' ')
+        if len(parts) < 2 or not parts[0].lower().startswith('>cluster'):
+            sys.exit(f"Error: expected a CD-HIT .clstr formatted cluster file for '-clustering_format CD-HIT'.\n"
+                     f"Found header: {header!r}\nPlease provide the CD-HIT .clstr file (usually ends with .clstr) not a FASTA file.")
     clusters = OrderedDict()
     pangenome_clusters_First = OrderedDict()
     pangenome_clusters_First_genomes = OrderedDict()
@@ -16,7 +34,7 @@ def cluster_CDHIT(options, splitter):
     reps = OrderedDict()
     tmp_genomes = None
     ## Load in all data for easier reuse later
-    for line in First_in:
+    for line in lines:
         if line.startswith('>'):
             if tmp_genomes != None:
                 pangenome_clusters_First_genomes[rep] = tmp_genomes

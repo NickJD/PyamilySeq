@@ -11,6 +11,21 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
 
 import traceback
 import sys
+import argparse
+
+def _normalise_clustering_format(value):
+    if value is None:
+        return None
+    v = value.strip()
+    low = v.lower()
+    if low in ('cd-hit', 'cdhit', 'cd_hit', 'cd-hit-est', 'cdhit-est'):
+        return 'CD-HIT'
+    if low.startswith('mmseq'):
+        return 'MMseqs'
+    if low.startswith('blast'):
+        return 'BLAST'
+    raise argparse.ArgumentTypeError(f"invalid clustering format: '{value}'. valid: CD-HIT, MMseqs, BLAST")
+
 
 def run_cd_hit(options, input_file, clustering_output, clustering_mode):
     logger = logging.getLogger("PyamilySeq.PyamilySeq")
@@ -82,8 +97,8 @@ def main():
 
     # Partial Mode Subparser
     partial_parser = subparsers.add_parser("Partial", help="Partial mode: PyamilySeq to process pre-clustered data.")
-    partial_parser.add_argument("-clustering_format", choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
-                                help="Clustering format used: CD-HIT, MMseqs2, or BLAST.")
+    partial_parser.add_argument("-clustering_format", type=_normalise_clustering_format, choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
+                                help="Clustering format used: CD-HIT, MMseqs2, or BLAST. ")
     partial_parser.add_argument("-cluster_file", required=True,
                                 help="Cluster file containing pre-clustered groups from CD-HIT, MMseqs, BLAST etc.")
     partial_parser.add_argument("-original_fasta", required=True,
@@ -117,6 +132,14 @@ def main():
                                  help="Memory allocation for clustering (MB) - CD-HIT parameter '-M'.")
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
                                  help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
+        # Options for selecting single-copy families
+        subparser.add_argument("--single_copy_only", action="store_true", dest="single_copy_only",
+                               help="If set, only report gene families that are strictly single-copy across genomes.")
+        subparser.add_argument("--single_copy_tolerance", type=float, dest="single_copy_tolerance", default=0.0,
+                               help=("Allow up to this percentage (0-100) of genomes in a family to have multi-copies. "
+                                     "If >0, families with multi-copy genomes less than or equal to this percentage are kept."))
+        subparser.add_argument("-gene_group_table", action="store_true", dest="gene_group_table",
+                               help="Output a tab-separated file mapping each gene to its assigned group (e.g. Group_1, Group_2, ...).")
 
     # Miscellaneous Arguments
     # Global logging options (user controls logfile creation)
@@ -130,6 +153,8 @@ def main():
 
     # Parse Arguments
     options = parser.parse_args()
+
+
 
     # Setup logger once we know output paths/options
     # after we resolve output_path / options.output_dir:
@@ -175,11 +200,12 @@ def main():
             if options.write_groups == None or options.original_fasta == None:
                 sys.exit('Must provide "-w" to output gene groups before alignment "-a" can be done.')
 
-    if options.clustering_format == 'CD-HIT':
+
+    if getattr(options, "clustering_format", "").upper() == "CD-HIT":
         clust_affix = '.clstr'
-    elif options.clustering_format == 'TSV':
+    if getattr(options, "clustering_format", "").upper() == "TSV":
         clust_affix = '.tsv'
-    elif options.clustering_format == 'CSV':
+    if getattr(options, "clustering_format", "").upper() == "CSV":
         clust_affix = '.csv'
 
     ###External tool checks:
@@ -232,7 +258,7 @@ def main():
 
 
     if options.run_mode == 'Full':
-        if options.clustering_format != 'CD-HIT':
+        if getattr(options, "clustering_format", "").upper() != "CD-HIT":
             sys.exit('Only CD-HIT clsutering works in Full Mode')
 
         if not os.path.exists(output_path):
@@ -283,6 +309,10 @@ def main():
                 self.align_aa = options.align_aa
                 self.fasta = combined_out_file
                 self.verbose = options.verbose
+                # single-copy reporting options
+                self.single_copy_only = options.single_copy_only
+                self.single_copy_tolerance = options.single_copy_tolerance
+                self.gene_group_table = options.gene_group_table
 
         clustering_options = clustering_options()
 
@@ -307,6 +337,10 @@ def main():
                 self.align_aa = options.align_aa
                 self.fasta = options.original_fasta
                 self.verbose = options.verbose
+                # single-copy reporting options
+                self.single_copy_only = options.single_copy_only
+                self.single_copy_tolerance = options.single_copy_tolerance
+                self.gene_group_table = options.gene_group_table
 
         clustering_options = clustering_options()
 

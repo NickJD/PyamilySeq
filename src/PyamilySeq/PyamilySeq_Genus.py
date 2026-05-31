@@ -1,5 +1,5 @@
-#from line_profiler_pycharm import profile
-
+import math
+from collections import Counter
 
 try:
     from .constants import *
@@ -54,6 +54,22 @@ def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_s
     #         edge_list_outfile.write(line + '\n')
 
 
+
+
+def write_gene_group_table(options, cores, pangenome_clusters_First_sequences_sorted):
+    output_path = os.path.abspath(options.output_dir)
+    out_file = os.path.join(output_path, 'gene_group_table.tsv')
+    cluster_to_group = {}
+    for group_num, core_key in enumerate(cores.keys(), start=1):
+        group_label = f"Group_{group_num}"
+        for cluster in cores[core_key]:
+            cluster_to_group[str(cluster)] = group_label
+    with open(out_file, 'w') as outfile:
+        for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
+            group_label = cluster_to_group.get(str(cluster), 'Unassigned')
+            for seq in sequences:
+                outfile.write(f"{seq}\t{group_label}\n")
+    print(f"Gene group table written to {out_file}")
 
 
 def get_cores(options):
@@ -139,6 +155,40 @@ def cluster(options):
     pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences, sorted_first_keys)
     pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type, sorted_first_keys)
 
+    # Apply single-copy filtering if requested by the user
+    if getattr(options, 'single_copy_only', False) or getattr(options, 'single_copy_tolerance', 0.0) > 0.0:
+        # Prefer an explicitly-provided non-zero tolerance. Otherwise treat
+        # --single_copy_only as shorthand for tolerance = 0.
+        if float(getattr(options, 'single_copy_tolerance', 0.0)) > 0.0:
+            tol_pct = float(options.single_copy_tolerance)
+        elif getattr(options, 'single_copy_only', False):
+            tol_pct = 0.0
+        else:
+            tol_pct = 0.0
+
+        if tol_pct < 0.0 or tol_pct > 100.0:
+            sys.exit("--single_copy_tolerance must be between 0 and 100")
+        if getattr(options, 'verbose', False):
+            print(f"Applying single-copy filtering with tolerance {tol_pct}%")
+
+        filtered_keys = []
+        for cluster in pangenome_clusters_Type_sorted.keys():
+            # total genomes in this cluster
+            total_genomes = len(pangenome_clusters_First_sorted.get(cluster, []))
+            if total_genomes == 0:
+                continue
+            sequences = pangenome_clusters_First_sequences_sorted.get(cluster, [])
+            # infer genome id by splitting on '_' (genus mode uses '_' as splitter)
+            genome_counts = Counter([seq.split('_')[0] for seq in sequences])
+            multi_copy_genomes = sum(1 for g, c in genome_counts.items() if c > 1)
+            allowed_multi = int(math.floor(total_genomes * (tol_pct / 100.0)))
+            if multi_copy_genomes <= allowed_multi:
+                filtered_keys.append(cluster)
+        # Reorder dictionaries to only include filtered clusters (preserve ordering)
+        pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First_sorted, filtered_keys)
+        pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences_sorted, filtered_keys)
+        pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type_sorted, filtered_keys)
+
     print("Calculating Groups")
     seen_groupings = []
     for cluster, numbers in pangenome_clusters_Type_sorted.items():
@@ -202,6 +252,9 @@ def cluster(options):
 
     if options.gene_presence_absence_out != False:
         gene_presence_absence_output(options,genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
+
+    if getattr(options, 'gene_group_table', False):
+        write_gene_group_table(options, cores, pangenome_clusters_First_sequences_sorted)
 
     if options.run_mode == 'Full':
         if options.reclustered == None:
