@@ -29,7 +29,7 @@ To update to the newest version add '-U' to end of the pip install command.
 ```commandline
 usage: PyamilySeq.py [-h] {Full,Partial} ...
 
-PyamilySeq v1.4.0: A tool for gene clustering and analysis.
+PyamilySeq v1.4.1: A tool for gene clustering and analysis.
 
 positional arguments:
   {Full,Partial}  Choose a mode: 'Full' or 'Partial'.
@@ -59,7 +59,7 @@ Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB_TIZS9k
 ```
 ### Example output:
 ```
-Running PyamilySeq v1.4.0
+Running PyamilySeq v1.4.1
 Calculating Groups
 Number of Genomes: 10
 Gene Groups
@@ -214,7 +214,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split_gff .gff3 -output_dir 
 ```
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-PyamilySeq v1.4.0: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
+PyamilySeq v1.4.1: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -257,7 +257,7 @@ usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -seq_type {AA,DNA}
                          [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
                          [-verbose] [-v]
 
-PyamilySeq v1.4.0: Group-Splitter - A tool to split multi-copy gene groups
+PyamilySeq v1.4.1: Group-Splitter - A tool to split multi-copy gene groups
 identified by PyamilySeq.
 
 options:
@@ -310,7 +310,7 @@ Group-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_ex
 usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
                           [-output_dir OUTPUT_DIR] [-verbose] [-v]
 
-PyamilySeq v1.4.0: Group-Summary - A tool to summarise CD-HIT clustering files.
+PyamilySeq v1.4.1: Group-Summary - A tool to summarise CD-HIT clustering files.
 
 options:
   -h, --help            show this help message and exit

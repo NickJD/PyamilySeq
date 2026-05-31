@@ -239,12 +239,14 @@ def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count
 
 def cluster(options):
 
+    print("Loading cluster file...")
     if options.cluster_format == 'CD-HIT':
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '|')
     elif 'BLAST' in options.cluster_format:
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_BLAST(options, '|')
     elif 'MMseqs' in options.cluster_format:
         genome_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_MMseqs(options, '|')
+    print(f"Loaded {len(pangenome_clusters_First):,} clusters across {len(genome_dict):,} genomes")
 
     ###
     cores, groups = get_cores(options, genome_dict)
@@ -255,15 +257,19 @@ def cluster(options):
     # which repeated the same operations (likely a leftover from editing).
     # Consolidate into one place to avoid redundant work and potential inconsistencies.
     if options.reclustered != None: # Combined clustering
+        print("Loading reclustered file...")
         if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genome_dict, '|')
         elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences  = combined_clustering_Edge_List(options, '|')
+        print(f"Loaded {len(combined_pangenome_clusters_Second):,} reclustered groups")
 
         # Count and classify groups using combined clustering data
+        print("Counting combined clusters...")
         pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences,  '|')
 
         # Sort First clusters
+        print("Sorting clusters...")
         sorted_First_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
         pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences, sorted_First_keys)
@@ -273,7 +279,9 @@ def cluster(options):
         sorted_Second_keys = sort_keys_by_values(combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences)
         combined_pangenome_clusters_Second_sequences_sorted = reorder_dict_by_keys(combined_pangenome_clusters_Second_sequences, sorted_Second_keys)
     else:
+        print("Counting clusters...")
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
+        print("Sorting clusters...")
         sorted_First_keys = sort_keys_by_values(pangenome_clusters_First, pangenome_clusters_First_sequences)
         pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First, sorted_First_keys)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences,
@@ -293,8 +301,7 @@ def cluster(options):
 
         if tol_pct < 0.0 or tol_pct > 100.0:
             sys.exit("--single_copy_tolerance must be between 0 and 100")
-        if getattr(options, 'verbose', False):
-            print(f"Applying single-copy filtering with tolerance {tol_pct}%")
+        print(f"Applying single-copy filtering with tolerance {tol_pct}%")
 
         filtered_keys = []
         for cluster in pangenome_clusters_Type_sorted.keys():
@@ -314,23 +321,23 @@ def cluster(options):
         # Reorder dictionaries to only include filtered clusters (preserve ordering)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences_sorted, filtered_keys)
         pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type_sorted, filtered_keys)
-
-
-
+        print(f"Retained {len(filtered_keys):,} clusters after single-copy filtering")
 
     Number_Of_Second_Extending_But_Same_Genomes = 0
 
-
-
-    print("Calculating Groups")
-    seen_groupings = []
-    for cluster, numbers in pangenome_clusters_Type_sorted.items():
+    total_clusters = len(pangenome_clusters_Type_sorted)
+    print(f"Calculating Groups ({total_clusters:,} clusters)...")
+    report_every = max(1, total_clusters // 10)
+    seen_groupings = set()
+    for i, (cluster, numbers) in enumerate(pangenome_clusters_Type_sorted.items(), start=1):
+        if i % report_every == 0 or i == total_clusters:
+            print(f"  Processed {i:,} / {total_clusters:,} clusters ({100 * i // total_clusters}%)")
     ############################### Calculate First only
         cluster = str(cluster)
         for grouping in numbers[2]: #!!# Could do with a more elegant solution
             current_cluster = grouping[0].split(':')[0]
             if current_cluster not in seen_groupings:
-                seen_groupings.append(current_cluster)
+                seen_groupings.add(current_cluster)
                 current_cluster_size = grouping[0].split(':')[1]
                 calc_First_only_core(current_cluster, current_cluster_size,groups,cores)
             ############################# Calculate First and Reclustered-Second
@@ -345,6 +352,7 @@ def cluster(options):
                     print("First cluster " + current_cluster + " already processed - This is likely because it was clustered with another First representative.")
 
     if options.reclustered != None:
+        print("Classifying reclustered groups...")
         combined_pangenome_clusters_ONLY_Second_Type = defaultdict(list)
         combined_pangenome_clusters_Second_Type = defaultdict(list)
         for cluster, genomes in combined_pangenome_clusters_Second.items():
@@ -360,6 +368,7 @@ def cluster(options):
                 calc_only_Second_only_core(cluster, data[1], groups, cores)
     ###########################
     ### Output
+    print("Writing summary statistics...")
     output_path = os.path.abspath(options.output_dir)
     if not os.path.exists(output_path):
         os.makedirs(output_path)
@@ -407,10 +416,12 @@ def cluster(options):
 
     genome_list = list(genome_dict.keys())
     if options.run_mode == 'Full':
+        print("Reading FASTA sequences...")
         sequences = read_fasta(options.fasta)
         if options.reclustered == None:
             combined_pangenome_clusters_Second_sequences = None
         ## Output representative sequences
+        print("Writing pan-genome reference sequences...")
         representatives_out = os.path.join(output_path,'pan_genome_reference.fa')
         with open(representatives_out, 'w') as outfile:
             for cluster, ids in pangenome_clusters_First_sequences.items():
@@ -436,6 +447,7 @@ def cluster(options):
 
 
     elif options.run_mode == 'Partial':
+        print("Reading FASTA sequences...")
         sequences = read_fasta(options.fasta)
         if options.reclustered == None:
             combined_pangenome_clusters_Second_sequences = None
@@ -450,6 +462,7 @@ def cluster(options):
         #                 print(2)
         #             outfile.write(wrapped_aa_seq + '\n')
         ## Output representative sequences
+        print("Writing pan-genome reference sequences...")
         representatives_out = os.path.join(output_path,'pan_genome_reference.fa')
         with open(representatives_out, 'w') as outfile:
             for cluster, ids in pangenome_clusters_First_sequences.items():

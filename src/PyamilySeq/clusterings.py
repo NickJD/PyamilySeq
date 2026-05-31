@@ -290,8 +290,8 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
     combined_pangenome_clusters_Second_sequences = OrderedDict()
     combined_pangenome_clusters_First_Second_clustered = OrderedDict()
 
-    not_Second_only_cluster_ids = []
-    already_seen_PEP = []
+    not_Second_only_cluster_ids = set()
+    already_seen_PEP = set()
     Combined_clusters = OrderedDict()
     Combined_reps = OrderedDict()
     first = True
@@ -305,7 +305,7 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
                         if pep in already_seen_PEP:
                             continue
                         else:
-                            already_seen_PEP.append(pep)
+                            already_seen_PEP.add(pep)
                 if len(combined_pangenome_clusters_Second_sequences[cluster_id]) > 0 and len(combined_pangenome_clusters_First_sequences[cluster_id]) > 0:
                     if len(combined_pangenome_clusters_First_sequences[cluster_id]) > 1:  # If we have clustered >1 First family, we need to record 1 as key and all others are val
                         all_but_first = combined_pangenome_clusters_First_sequences[cluster_id][1:]
@@ -343,8 +343,7 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
                         combined_pangenome_clusters_Second[cluster_id].append(clustered_taxa)
                     combined_pangenome_clusters_Second_sequences[cluster_id].append(clustered)
                 else:
-                    if cluster_id not in not_Second_only_cluster_ids:
-                        not_Second_only_cluster_ids.append(cluster_id)
+                    not_Second_only_cluster_ids.add(cluster_id)
                     if clustered_taxa not in combined_pangenome_clusters_First[cluster_id]:
                         combined_pangenome_clusters_First[cluster_id].append(clustered_taxa)
                     combined_pangenome_clusters_First_sequences[cluster_id].append(clustered)
@@ -405,8 +404,8 @@ def combined_clustering_Edge_List(options, splitter):
     combined_pangenome_clusters_Second_sequences = OrderedDict()
     combined_pangenome_clusters_First_Second_clustered = OrderedDict()
 
-    not_Second_only_cluster_ids = []
-    already_seen_PEP = []
+    not_Second_only_cluster_ids = set()
+    already_seen_PEP = set()
     Combined_clusters = OrderedDict()
     Combined_reps = OrderedDict()
     first = True
@@ -433,7 +432,7 @@ def combined_clustering_Edge_List(options, splitter):
                         if pep in already_seen_PEP:
                             continue
                         else:
-                            already_seen_PEP.append(pep)
+                            already_seen_PEP.add(pep)
                 if len(combined_pangenome_clusters_Second_sequences[str(cluster_id)]) > 0 and len(combined_pangenome_clusters_First_sequences[str(cluster_id)]) > 0:
                     if len(combined_pangenome_clusters_First_sequences[str(cluster_id)]) > 1:  # If we have clustered >1 PEP family, we need to record 1 as key and all others are val
                         all_but_first = combined_pangenome_clusters_First_sequences[str(cluster_id)][1:]
@@ -458,8 +457,7 @@ def combined_clustering_Edge_List(options, splitter):
                 combined_pangenome_clusters_Second[str(cluster_id)].append(child_taxa)
             combined_pangenome_clusters_Second_sequences[str(cluster_id)].append(child)
         else:
-            if str(cluster_id) not in not_Second_only_cluster_ids:
-                not_Second_only_cluster_ids.append(str(cluster_id))  # Tell us which StORF-Reporter clustered are unmatched to a PEP
+            not_Second_only_cluster_ids.add(str(cluster_id))
             if child_taxa not in combined_pangenome_clusters_First[str(cluster_id)]:
                 combined_pangenome_clusters_First[str(cluster_id)].append(child_taxa)
             combined_pangenome_clusters_First_sequences[str(cluster_id)].append(child)

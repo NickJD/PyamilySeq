@@ -6,7 +6,7 @@ from datetime import datetime
 from io import StringIO
 import re
 
-PyamilySeq_Version = 'v1.4.0'
+PyamilySeq_Version = 'v1.4.1'
 WELCOME = f"Thank you for using PyamilySeq {PyamilySeq_Version} - A tool for gene clustering and pangenome analysis."
 CITATION = "Please Cite PyamilySeq: https://doi.org/10.1093/nargab/lqaf198"
 ISSUE = "Please report any issues to: https://github.com/NickJD/PyamilySeq/issues"
