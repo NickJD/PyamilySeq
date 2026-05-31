@@ -29,7 +29,7 @@ To update to the newest version add '-U' to end of the pip install command.
 ```commandline
 usage: PyamilySeq.py [-h] {Full,Partial} ...
 
-PyamilySeq v1.4.1: A tool for gene clustering and analysis.
+PyamilySeq v1.4.2: A tool for gene clustering and analysis.
 
 positional arguments:
   {Full,Partial}  Choose a mode: 'Full' or 'Partial'.
@@ -59,7 +59,7 @@ Escherichia_coli_110957|ENSB_TIZS9kbTvShDvyX	Escherichia_coli_110957|ENSB_TIZS9k
 ```
 ### Example output:
 ```
-Running PyamilySeq v1.4.1
+Running PyamilySeq v1.4.2
 Calculating Groups
 Number of Genomes: 10
 Gene Groups
@@ -156,8 +156,10 @@ options:
   --single_copy_tolerance SINGLE_COPY_TOLERANCE
                         Allow up to this percentage (0-100) of genomes in a family to have multi-copies. If >0, families with multi-copy genomes less than or equal to
                         this percentage are kept.
-  -gene_group_table     Output a tab-separated file mapping each gene to its assigned group (e.g. Group_1, Group_2, ...).
-  -verbose              Print verbose output.
+  -gene_group_table     Output a tab-separated file mapping each gene to its
+                        gene family group name (e.g. group_0, group_1, ...).
+  -core_group_table     Output a tab-separated file mapping each gene to its
+                        assigned core category (e.g. Group_1, Group_2, ...).  -verbose              Print verbose output.
   -v, --version         Print version number and exit.
 
 ```
@@ -199,7 +201,10 @@ options:
   --single_copy_tolerance SINGLE_COPY_TOLERANCE
                         Allow up to this percentage (0-100) of genomes in a family to have multi-copies. If >0, families with multi-copy genomes less than or equal to
                         this percentage are kept.
-  -gene_group_table     Output a tab-separated file mapping each gene to its assigned group (e.g. Group_1, Group_2, ...).
+  -gene_group_table     Output a tab-separated file mapping each gene to its
+                        gene family group name (e.g. group_0, group_1, ...).
+  -core_group_table     Output a tab-separated file mapping each gene to its
+                        assigned core category (e.g. Group_1, Group_2, ...).
   -verbose              Print verbose output.
   -v, --version         Print version number and exit.
 
@@ -214,7 +219,7 @@ Seq-Combiner -input_dir .../test_data/genomes -name_split_gff .gff3 -output_dir 
 ```
 usage: Seq_Combiner.py [-h] -input_dir INPUT_DIR -input_type {separate,combined,fasta} [-name_split_gff NAME_SPLIT_GFF] [-name_split_fasta NAME_SPLIT_FASTA] -output_dir OUTPUT_DIR -output_name OUTPUT_FILE [-gene_ident GENE_IDENT] [-translate] [-v]
 
-PyamilySeq v1.4.1: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
+PyamilySeq v1.4.2: Seq-Combiner - A tool to extract sequences from GFF/FASTA files and prepare them for PyamilySeq.
 
 options:
   -h, --help            show this help message and exit
@@ -257,7 +262,7 @@ usage: Group_Splitter.py [-h] -input_fasta INPUT_FASTA -seq_type {AA,DNA}
                          [-M CLUSTERING_MEMORY] [-no_delete_temp_files]
                          [-verbose] [-v]
 
-PyamilySeq v1.4.1: Group-Splitter - A tool to split multi-copy gene groups
+PyamilySeq v1.4.2: Group-Splitter - A tool to split multi-copy gene groups
 identified by PyamilySeq.
 
 options:
@@ -310,7 +315,7 @@ Group-Summary -genome_num 10 -input_clstr .../test_data/species/E-coli/E-coli_ex
 usage: Cluster_Summary.py [-h] -input_clstr INPUT_CLSTR -output OUTPUT -genome_num GENOME_NUM
                           [-output_dir OUTPUT_DIR] [-verbose] [-v]
 
-PyamilySeq v1.4.1: Group-Summary - A tool to summarise CD-HIT clustering files.
+PyamilySeq v1.4.2: Group-Summary - A tool to summarise CD-HIT clustering files.
 
 options:
   -h, --help            show this help message and exit

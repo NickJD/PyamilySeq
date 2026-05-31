@@ -139,7 +139,9 @@ def main():
                                help=("Allow up to this percentage (0-100) of genomes in a family to have multi-copies. "
                                      "If >0, families with multi-copy genomes less than or equal to this percentage are kept."))
         subparser.add_argument("-gene_group_table", action="store_true", dest="gene_group_table",
-                               help="Output a tab-separated file mapping each gene to its assigned group (e.g. Group_1, Group_2, ...).")
+                               help="Output a tab-separated file mapping each gene to its gene family group name (e.g. group_0, group_1, ...).")
+        subparser.add_argument("-core_group_table", action="store_true", dest="core_group_table",
+                               help="Output a tab-separated file mapping each gene to its assigned core category (e.g. Group_1, Group_2, ...).")
 
     # Miscellaneous Arguments
     # Global logging options (user controls logfile creation)
@@ -313,6 +315,7 @@ def main():
                 self.single_copy_only = options.single_copy_only
                 self.single_copy_tolerance = options.single_copy_tolerance
                 self.gene_group_table = options.gene_group_table
+                self.core_group_table = options.core_group_table
 
         clustering_options = clustering_options()
 
@@ -341,6 +344,7 @@ def main():
                 self.single_copy_only = options.single_copy_only
                 self.single_copy_tolerance = options.single_copy_tolerance
                 self.gene_group_table = options.gene_group_table
+                self.core_group_table = options.core_group_table
 
         clustering_options = clustering_options()
 

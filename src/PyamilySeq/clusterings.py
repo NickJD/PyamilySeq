@@ -78,29 +78,38 @@ def cluster_BLAST(options, splitter):
     pangenome_clusters_First_sequences = defaultdict(list)
     taxa_dict = defaultdict(int)
     reps = OrderedDict()
-    edges = defaultdict(list)
+    edges = defaultdict(set)
     for line in First_in:
         elements = line.strip().split(separator)
         rep, child = elements[0], elements[1]
-        child_taxa = child.split(splitter)[0]  # Extracting the genome identifier from the child sequence
+        if rep == child:
+            # Self-hit: still register the node so singletons are captured
+            edges[rep]  # touch to ensure key exists in defaultdict
+            child_taxa = child.split(splitter)[0]
+            taxa_dict[child_taxa] += 1
+            continue
+        child_taxa = child.split(splitter)[0]
         # Counting occurrences of genomes
         taxa_dict[child_taxa] += 1
-        edges[rep].append(child)
-        edges[child].append(rep)
+        edges[rep].add(child)
+        edges[child].add(rep)
 
     visited = set()
     cluster_id = 0
+    cluster_genomes_seen = {}  # cluster_id -> set of genomes, for O(1) membership
 
     def dfs(node, cluster_id):
         stack = [node]
         tmp_genomes = []
+        genomes_seen = cluster_genomes_seen[cluster_id]
         while stack:
             current = stack.pop()
             if current not in visited:
                 visited.add(current)
                 clustered_taxa = current.split(splitter)[0]
                 pangenome_clusters_First_sequences[cluster_id].append(current)
-                if clustered_taxa not in pangenome_clusters_First[cluster_id]:
+                if clustered_taxa not in genomes_seen:
+                    genomes_seen.add(clustered_taxa)
                     pangenome_clusters_First[cluster_id].append(clustered_taxa)
                     tmp_genomes.append(clustered_taxa)
                 for neighbor in edges[current]:
@@ -114,6 +123,7 @@ def cluster_BLAST(options, splitter):
             pangenome_clusters_First[cluster_id] = []
             pangenome_clusters_First_sequences[cluster_id] = []
             pangenome_clusters_First_genomes[node] = []
+            cluster_genomes_seen[cluster_id] = set()
             dfs(node, cluster_id)
             cluster_id += 1
 

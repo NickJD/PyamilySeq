@@ -56,9 +56,20 @@ def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_s
 
 
 
-def write_gene_group_table(options, cores, pangenome_clusters_First_sequences_sorted):
+def write_gene_group_table(options, pangenome_clusters_First_sequences_sorted):
     output_path = os.path.abspath(options.output_dir)
     out_file = os.path.join(output_path, 'gene_group_table.tsv')
+    with open(out_file, 'w') as outfile:
+        for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
+            group_name = f"group_{cluster}"
+            for seq in sequences:
+                outfile.write(f"{seq}\t{group_name}\n")
+    print(f"Gene group table written to {out_file}")
+
+
+def write_core_group_table(options, cores, pangenome_clusters_First_sequences_sorted):
+    output_path = os.path.abspath(options.output_dir)
+    out_file = os.path.join(output_path, 'core_group_table.tsv')
     cluster_to_group = {}
     for group_num, core_key in enumerate(cores.keys(), start=1):
         group_label = f"Group_{group_num}"
@@ -69,7 +80,7 @@ def write_gene_group_table(options, cores, pangenome_clusters_First_sequences_so
             group_label = cluster_to_group.get(str(cluster), 'Unassigned')
             for seq in sequences:
                 outfile.write(f"{seq}\t{group_label}\n")
-    print(f"Gene group table written to {out_file}")
+    print(f"Core group table written to {out_file}")
 
 
 def get_cores(options):
@@ -264,7 +275,10 @@ def cluster(options):
         gene_presence_absence_output(options,genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted)
 
     if getattr(options, 'gene_group_table', False):
-        write_gene_group_table(options, cores, pangenome_clusters_First_sequences_sorted)
+        write_gene_group_table(options, pangenome_clusters_First_sequences_sorted)
+
+    if getattr(options, 'core_group_table', False):
+        write_core_group_table(options, cores, pangenome_clusters_First_sequences_sorted)
 
     if options.run_mode == 'Full':
         if options.reclustered == None:
