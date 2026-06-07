@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import argparse
 import pandas as pd
 from collections import defaultdict
@@ -73,17 +71,19 @@ def parse_pyamily_gene_to_family(mapping_file):
 
 def extract_gene_order(gene_id):
     """
-    SAMEA7551658_00012 -> 12
+    SAMEA7551658|00012 -> 12
     """
     try:
-        return int(gene_id.split("_")[-1])
+        sep = "|" if "|" in gene_id else "_"
+        return int(gene_id.split(sep)[-1])
     except:
         return 10**12
 
 
 def load_genes_from_fasta_headers(fasta_file):
     """
-    Extract gene order per genome from FASTA headers
+    Extract gene order per genome from FASTA headers.
+    Supports both SAMEA7551658|00012 and SAMEA7551658_00012 formats.
     """
     genome2genes = defaultdict(list)
 
@@ -91,7 +91,8 @@ def load_genes_from_fasta_headers(fasta_file):
         for line in f:
             if line.startswith(">"):
                 gene = line.strip()[1:]
-                genome = gene.split("_")[0]
+                sep = "|" if "|" in gene else "_"
+                genome = gene.split(sep)[0]
                 genome2genes[genome].append(gene)
 
     for genome in genome2genes:
@@ -115,7 +116,8 @@ def main():
     ap.add_argument("--rank", default="genus",
                     choices=RANK_INDEX.keys())
 
-    ap.add_argument("--output", required=True)
+    ap.add_argument("--output", required=True,
+                    help="Output CSV file path (e.g. output.csv)")
 
     args = ap.parse_args()
 
@@ -126,22 +128,10 @@ def main():
     genome2genes = load_genes_from_fasta_headers(args.fasta)
 
     with open(args.output, "w") as out:
-
         for genome, genes in genome2genes.items():
-
             group = genome2group.get(genome, "NA")
-
-            families = []
-
-            for gene in genes:
-                fam = gene2fam.get(gene, "NA")
-                families.append(fam)
-
-            out.write(
-                genome + "\t" +
-                group + "\t" +
-                "\t".join(families) + "\n"
-            )
+            families = [gene2fam.get(gene, "NA") for gene in genes]
+            out.write(",".join([genome, group] + families) + "\n")
 
 
 if __name__ == "__main__":
