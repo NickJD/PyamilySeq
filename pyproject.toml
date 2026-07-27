@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyamilySeq"
-version = "1.4.2"
+version = "1.5.0"
 authors = [
     {name = "Nicholas Dimonaco", email = "nicholas@dimonaco.co.uk"}
 ]
-description = "PyamilySeq - A a tool to investigate sequence-based gene groups identified by clustering methods such as CD-HIT, DIAMOND, BLAST or MMseqs2."
+description = "Build and analyze gene families and pangenomes from CD-HIT, DIAMOND, BLAST, or MMseqs2 clustering results."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {file = "LICENSE"}
@@ -20,6 +20,18 @@ classifiers = [
 ]
 dependencies = [
     "levenshtein>=0.27.3"
+]
+
+[project.optional-dependencies]
+analysis = [
+    "matplotlib>=3.8",
+    "networkx>=3.2",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "seaborn>=0.13",
+]
+dev = [
+    "pytest>=8",
 ]
 
 [project.urls]
@@ -41,11 +53,14 @@ Homepage = "https://github.com/NickJD/PyamilySeq"
     seq-finder = "PyamilySeq.Seq_Finder:main"
     Seq-Extractor = "PyamilySeq.Seq_Extractor:main"
     seq-extractor = "PyamilySeq.Seq_Extractor:main"
-
-    compute-singletrees-rf = "aux_tools.RF.Compute_SingleTree_RFs:main"
-    compare-rf = "aux_tools.RF.compare_RF:main"
-    compare-contree-singletrees = "aux_tools.RF.compare_contree_singletrees:main"
-
+    Group-Compare = "PyamilySeq.Group_Compare:main"
+    group-compare = "PyamilySeq.Group_Compare:main"
+    Group-Sizes = "PyamilySeq.Group_Sizes:main"
+    group-sizes = "PyamilySeq.Group_Sizes:main"
+    Track-Family-Locations = "PyamilySeq.location_tracking:run_from_cli"
+    track-family-locations = "PyamilySeq.location_tracking:run_from_cli"
+    PyamilySeq-Validate = "PyamilySeq.validation:run_from_cli"
+    pyamilyseq-validate = "PyamilySeq.validation:run_from_cli"
 
 [tool.setuptools]
 include-package-data = true
@@ -57,3 +72,11 @@ include = ["PyamilySeq*"]
 [tool.setuptools.package-data]
 PyamilySeq = [
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120

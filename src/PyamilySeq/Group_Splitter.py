@@ -26,12 +26,15 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
     logger.debug("Group-Splitter CD-HIT command: %s", " ".join(cdhit_command))
     try:
         if options.verbose:
-            subprocess.run(cdhit_command)
+            result = subprocess.run(cdhit_command)
         else:
-            subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            result = subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if result.returncode != 0:
+            raise RuntimeError(f"{clustering_mode} returned exit code {result.returncode}")
         logger.info("CD-HIT completed for %s", input_file)
     except Exception:
         logger.exception("Error running CD-HIT for %s", input_file)
+        raise
 
 
 def calculate_new_rep_seq(cluster_data, length_weight=1.0, identity_weight=1.0):
@@ -49,10 +52,23 @@ def calculate_new_rep_seq(cluster_data, length_weight=1.0, identity_weight=1.0):
     def score(entry):
         normalized_length_diff = abs(entry['length'] - avg_length) / max_length
         normalized_identity_diff = abs(entry['percent_identity'] - avg_identity) / max_identity
-        return (length_weight * normalized_length_diff) + (identity_weight * (1 - normalized_identity_diff))
+        return (length_weight * normalized_length_diff) + (identity_weight * normalized_identity_diff)
 
     rep_entry = min(cluster_data, key=score)
     return rep_entry
+
+
+def parse_group_sequence_header(header):
+    """Return family, genome, and gene tokens from legacy or canonical headers."""
+
+    clean = header.strip().lstrip('>')
+    parts = clean.split('|', 2)
+    if len(parts) < 2:
+        raise ValueError(f"Group FASTA header lacks a genome-qualified member ID: {header!r}")
+    family = parts[0]
+    genome = parts[1]
+    gene = parts[2] if len(parts) == 3 else parts[1]
+    return family, genome, gene
 
 
 
@@ -83,7 +99,10 @@ def read_fasta_groups(options, groups_to_use):
 
     # Ensure we look for the combined file that includes the requested group level (e.g. "99")
     # groups_to_use[1] contains the numeric group level when using ('groups', <num>)
-    group_level = str(groups_to_use[1]) if groups_to_use and len(groups_to_use) > 1 else ''
+    if groups_to_use and groups_to_use[0] == 'ids':
+        group_level = str(getattr(options, 'groups', None) or 99)
+    else:
+        group_level = str(groups_to_use[1]) if groups_to_use and len(groups_to_use) > 1 else ''
     # combined groups are read from the original PyamilySeq Gene_Groups_Output directory
     gene_groups_input_dir = getattr(options, 'gene_groups_input', os.path.join(options.input_directory, 'Gene_Groups_Output'))
     combined_groups_fasta = os.path.join(gene_groups_input_dir, f"combined_group_sequences_{group_level}{affix}")
@@ -105,19 +124,11 @@ def read_fasta_groups(options, groups_to_use):
         raise SystemExit(1)
 
     if groups_to_use[0] == 'ids':
-        selected_group_ids = [int(g.strip()) for g in groups_to_use[1].split(',')]
+        selected_group_ids = {g.strip().lstrip('>') for g in groups_to_use[1].split(',') if g.strip()}
     elif groups_to_use[0] == 'groups':
-        selected_groups = set(range(int(groups_to_use[1]), 101))
-        # Scan the directory for filenames that match the criteria
-        selected_group_ids = []
-        for filename in os.listdir(os.path.dirname(combined_groups_fasta)):
-            if 'core' in filename and filename.endswith('.fasta'):
-                try:
-                    group_number = int(filename.split('_')[2])
-                    if group_number in selected_groups:
-                        selected_group_ids.append(int(filename.split('_')[3].split('.')[0]))
-                except ValueError:
-                    continue
+        # The combined file was already filtered by PyamilySeq's -write_groups
+        # setting, so every family in it is eligible.
+        selected_group_ids = None
 
 
     group_number = None
@@ -128,14 +139,15 @@ def read_fasta_groups(options, groups_to_use):
                     groups[current_group].append((current_group_header, ''.join(current_sequence)))
 
                 current_group_header = line.strip()
-                current_group = current_group_header.split('|')[0]
-                genome = current_group_header.split('|')[1]
+                family, genome, _ = parse_group_sequence_header(current_group_header)
+                current_group = '>' + family
                 current_sequence = []
                 genome_count[genome] += 1
 
                 # Only process if group matches the selected_groups or if no specific groups were provided
-                group_number = int(current_group.replace('>Group_', ''))  # Assuming format 'Group_n'
-                if selected_group_ids is not None and group_number not in selected_group_ids:
+                group_number = family
+                legacy_number = family.replace('Group_', '').replace('group_', '')
+                if selected_group_ids is not None and family not in selected_group_ids and legacy_number not in selected_group_ids:
                     current_group = None  # Skip this group
                     continue
 
@@ -212,7 +224,7 @@ def separate_groups(options, clustering_mode, groups_to_use):
         # Count genomes with more than one gene
         genome_to_gene_count = defaultdict(int)
         for header, _ in sequences:
-            genome = header.split('|')[1]
+            _, genome, _ = parse_group_sequence_header(header)
             genome_to_gene_count[genome] += 1
 
         num_genomes_with_multiple_genes = sum(1 for count in genome_to_gene_count.values() if count > 1)
@@ -276,12 +288,10 @@ def separate_groups(options, clustering_mode, groups_to_use):
                 remaining_sequences_tmp = sequences.copy()  # Track unprocessed sequences
                 remaining_sequences = [entry for entry in remaining_sequences_tmp if entry[0] in
                                        {seq_entry['header'] for seq_entry in cluster}]
-                sequences_to_remove = []
-
                 while remaining_sequences:
                     # Track subgroups for this cluster pass
                     subgroup_sequences = []
-                    genome_seen = set()
+                    sequences_to_remove = []
 
                     # Recalculate representative sequence dynamically for this cluster
                     rep = calculate_new_rep_seq(
@@ -302,7 +312,7 @@ def separate_groups(options, clustering_mode, groups_to_use):
 
                         # Iterate over each sequence in the remaining sequences for this genome
                         for header, seq in remaining_sequences:
-                            genome_id = header.split('|')[1]
+                            _, genome_id, _ = parse_group_sequence_header(header)
 
                             if genome_id == genome:  # Ensure this sequence belongs to the current genome
                                 if rep_seq == seq:
@@ -326,19 +336,24 @@ def separate_groups(options, clustering_mode, groups_to_use):
 
                         # Add the best sequence for this genome to the subgroup
                         if best_sequence is not None:
-                            new_header = f">{group_file_name}_subgroup_{subgroup_id}|{best_sequence[0].split('|')[1]}|{best_sequence[0].split('|')[2]}"
+                            _, best_genome, best_gene = parse_group_sequence_header(best_sequence[0])
+                            new_header = f">{group_file_name}_subgroup_{subgroup_id}|{best_genome}|{best_gene}"
                             subgroup_sequences.append((new_header, best_sequence[1]))
                             sequences_to_remove.append(best_sequence)
-                            genome_seen.add(genome)
 
                     # Write each subgroup into a separate FASTA file
                     if subgroup_sequences:
-                        subgroup_file = f"{options.sub_groups_output}/{group_file_name}_subgroup_{subgroup_id}.fasta"
+                        sequence_suffix = '_aa.fasta' if options.sequence_type == 'AA' else '_dna.fasta'
+                        subgroup_file = f"{options.sub_groups_output}/{group_file_name}_subgroup_{subgroup_id}{sequence_suffix}"
                         write_fasta(subgroup_sequences, subgroup_file)
 
                         # Record subgroup info for report
                         report_entry['split'] = True
-                        report_entry['reason'] = 'cdhit_multiple_clusters'
+                        report_entry['reason'] = (
+                            'cdhit_multiple_clusters'
+                            if len(clustered_sequences) > 1
+                            else 'nonidentical_paralog_partition'
+                        )
                         report_entry['num_subgroups'] += 1
                         report_entry['subgroup_sizes'].append(len(subgroup_sequences))
                         # representative header for this subgroup is the first sequence's header (best sequence for a genome)
@@ -361,17 +376,17 @@ def separate_groups(options, clustering_mode, groups_to_use):
 
         else:
             # Condition 2: If sequences are identical, distribute genes evenly into subgroups
-            num_subgroups = 1000
+            num_subgroups = max(genome_to_gene_count.values(), default=1)
             subgroup_sequences = defaultdict(list)  # Store sequences for each subgroup
             genome_count = defaultdict(int)  # Count how many genes have been assigned to each genome
 
             # Iterate over all sequences regardless of whether the genome has been seen
             for header, seq in sequences:
-                genome = header.split('|')[1]
+                _, genome, gene = parse_group_sequence_header(header)
 
                 # Determine the next subgroup for this genome
                 subgroup_id = genome_count[genome] % num_subgroups
-                new_header = f"{group_file_name}_subgroup_{subgroup_id}|{genome}|{header.split('|')[2]}"
+                new_header = f">{group_file_name}_subgroup_{subgroup_id}|{genome}|{gene}"
                 subgroup_sequences[subgroup_id].append((new_header, seq))
 
                  # Increment the count for this genome
@@ -379,7 +394,11 @@ def separate_groups(options, clustering_mode, groups_to_use):
 
             # Write out each subgroup to a separate FASTA file
             for subgroup_id, seqs in subgroup_sequences.items():
-                subgroup_file = os.path.join(options.sub_groups_output, f"{group_file_name}_subgroup_{subgroup_id}.fasta")
+                sequence_suffix = '_aa.fasta' if options.sequence_type == 'AA' else '_dna.fasta'
+                subgroup_file = os.path.join(
+                    options.sub_groups_output,
+                    f"{group_file_name}_subgroup_{subgroup_id}{sequence_suffix}",
+                )
                 write_fasta(seqs, subgroup_file)
 
                 # Increment subgroup ID globally for the next subgroup
@@ -524,6 +543,15 @@ def main():
     parser.add_argument("--log", action="store_true", dest="log", help="Create a timestamped logfile for this run.")
     parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: input_directory).")
     options = parser.parse_args()
+    if options.genome_num <= 0:
+        parser.error('-genome_num must be a positive integer')
+    if not 0 <= options.group_threshold <= 100:
+        parser.error('-group_threshold must be between 0 and 100')
+    if not 0 < options.pident <= 1:
+        parser.error('-c must be greater than 0 and at most 1')
+    if not 0 <= options.len_diff <= 1:
+        parser.error('-s must be between 0 and 1')
+    options.align_aa = options.sequence_type == 'AA'
     # Compute logfile directory (default to input_directory) and only enable file logging when --log is provided.
     log_dir = options.log_dir if getattr(options, "log_dir", None) else os.path.abspath(options.input_directory)
     logger = configure_logger("PyamilySeq.Group_Splitter", enable_file=getattr(options, "log", False), log_dir=log_dir, verbose=options.verbose)
@@ -531,20 +559,17 @@ def main():
 
     ###External tool checks:
     ##MAFFT
-    if options.align_core == True:
+    if options.align_core is not None:
         if is_tool_installed('mafft'):
             if options.verbose == True:
                 print("mafft is installed. Proceeding with alignment.")
         else:
-            exit("mafft is not installed. Please install mafft to proceed.")
+            raise SystemExit("mafft is not installed. Please install mafft to proceed.")
 
     ##CD-HIT
-    if is_tool_installed('cd-hit'):
-        logger.info("cd-hit is installed. Proceeding with clustering.")
-        if options.sequence_type == 'DNA':
-            clustering_mode = 'cd-hit-est'
-        else:
-            clustering_mode = 'cd-hit'
+    clustering_mode = 'cd-hit-est' if options.sequence_type == 'DNA' else 'cd-hit'
+    if is_tool_installed(clustering_mode):
+        logger.info("%s is installed. Proceeding with clustering.", clustering_mode)
         if options.fast_mode == True:
             options.fast_mode = 0
             if options.verbose == True:
@@ -554,11 +579,15 @@ def main():
             if options.verbose == True:
                 print("Running CD-HIT in slow mode.")
     else:
-        logger.error("cd-hit is not installed. Please install cd-hit to proceed.")
-        exit("cd-hit is not installed. Please install cd-hit to proceed.")
+        logger.error("%s is not installed. Please install CD-HIT to proceed.", clustering_mode)
+        raise SystemExit(f"{clustering_mode} is not installed. Please install CD-HIT to proceed.")
 
     ##Alignment
     if options.align_core != None:
+        try:
+            options.align_core_threshold = int(str(options.align_core).split(',')[0])
+        except ValueError:
+            raise SystemExit('"-a" must start with an integer core threshold, e.g. "-a 99".')
         if options.groups == None and options.group_ids == None:
             raise SystemExit('Must provide "-groups" or "-group_ids" when requesting alignment with "-a".')
 
@@ -593,10 +622,8 @@ def main():
             outfile.write(f"{arg}: {value}\n")
     logger.info("Saved parameters to %s", params_out)
 
-    ## Group Selection - FIX THIS - currently fails if either are not provided
-    if options.groups != None and options.group_ids != None:
-        raise SystemExit('Must provide "-group_ids" or "-groups", not both.')
-    elif options.group_ids != None:
+    ## Group Selection
+    if options.group_ids != None:
         groups_to_use = ('ids', options.group_ids)
     elif options.groups != None:
         groups_to_use = ('groups', options.groups)
@@ -616,110 +643,103 @@ def main():
         logger.debug("Group %s -> new groups: %s sizes: %s", group_id, data['count'], data['sizes'])
 
 
-    # Read summary statistics (summary_statistics.txt should still live in the input directory)
-    with open(summary_file, 'r') as f:
-        summary_data = f.read().splitlines()
-
+    # Recalculate every configured First_core_* bin rather than assuming 99/95/15/0.
+    with open(summary_file, encoding='utf-8') as handle:
+        summary_data = handle.read().splitlines()
     summary_info = {}
     for line in summary_data:
-        if ':' in line:
-            key, value = line.split(':')
-            summary_info[key.strip()] = int(value.strip())
-
-    genome_num = summary_info['Number of Genomes']
-    core_99 = summary_info['First_core_99']
-    core_95 = summary_info['First_core_95']
-    core_15 = summary_info['First_core_15']
-    core_0 = summary_info['First_core_0']
-    total_gene_groups = summary_info['Total Number of First Gene Groups (Including Singletons)']
-
-    # Initialise new core values
-    new_core_99 = core_99
-    new_core_95 = core_95
-    new_core_15 = core_15
-    new_core_0 = core_0
-
-    # Recalculate each *_core_* value
-    for group_id, data in paralog_groups.items():
-        group_id = group_id.replace('>Group_', '')
-        # Find the original group filename in gene_groups_output that:
-        #  - contains the requested group level (options.groups, e.g. '99')
-        #  - corresponds to this subgroup id (group_id)
-        original_group = None
-        for fname in os.listdir(options.gene_groups_output):
-            if not fname.endswith('.fasta'):
-                continue
-            # Require the filename to include the group level token (e.g., '_99_') to avoid false matches
-            if f"_{options.groups}_" not in fname:
-                continue
-            # Accept filenames that end with _<group_id>.fasta or _<group_id>_dna.fasta/_aa.fasta
-            if fname.endswith(f"_{group_id}.fasta") or fname.endswith(f"_{group_id}_dna.fasta") or fname.endswith(f"_{group_id}_aa.fasta"):
-                original_group = fname
-                break
-        if original_group is None:
-            # fallback: attempt a looser match (preserve previous behavior)
-            for fname in os.listdir(options.gene_groups_output):
-                if fname.endswith(f"_{group_id}.fasta") or fname.endswith(f"_{group_id}_dna.fasta") or fname.endswith(f"_{group_id}_aa.fasta"):
-                    original_group = fname
-                    break
-        if original_group is None:
-            # If still not found, skip recalculation for this paralog group
-            logger.warning("Could not find original group file for subgroup id %s in %s", group_id, options.gene_groups_output)
+        if ':' not in line:
             continue
-        # Extract the core-group number from the filename (expected at index 2: First_core_99_3_dna.fasta)
+        key, value = line.split(':', 1)
         try:
-            original_group_num = int(original_group.split('_')[2])
-        except Exception:
-            logger.warning("Unexpected filename format for %s; skipping", original_group)
+            summary_info[key.strip()] = int(value.strip())
+        except ValueError:
             continue
-        original_group = original_group_num
-        if original_group == 99:
-            new_core_99 -= 1
-        elif original_group == 95:
-            new_core_95 -= 1
-        elif original_group == 15:
-            new_core_15 -= 1
-        elif original_group == 0:
-            new_core_0 -= 1
+    genome_num = next(
+        (value for key, value in summary_info.items() if key.lower() == 'number of genomes'),
+        options.genome_num,
+    )
+    category_counts = OrderedDict(
+        (key, value) for key, value in summary_info.items() if key.startswith('First_core_')
+    )
+    if not category_counts:
+        raise RuntimeError(f'No First_core_* categories found in {summary_file}')
+    percentage_bins = sorted({
+        int(key.rsplit('_', 1)[1])
+        for key in category_counts
+        if key.rsplit('_', 1)[1].isdigit()
+    }, reverse=True)
 
+    def source_category_for(family_id):
+        family_id = family_id.lstrip('>')
+        legacy_id = family_id.replace('Group_', '').replace('group_', '')
+        for filename in os.listdir(options.gene_groups_input):
+            if not filename.endswith(('.fasta', '.fa')):
+                continue
+            for candidate in (family_id, legacy_id):
+                marker = f'_{candidate}_'
+                if marker in filename:
+                    return filename.split(marker, 1)[0]
+                if filename.endswith(f'_{candidate}.fasta'):
+                    return filename[:-len(f'_{candidate}.fasta')]
+        return None
+
+    updated_counts = OrderedDict(category_counts)
+    original_total = next(
+        (
+            value for key, value in summary_info.items()
+            if key.lower() in {
+                'final gene families',
+                'total number of first gene groups (including singletons)',
+            }
+        ),
+        sum(category_counts.values()),
+    )
+    total_gene_groups = original_total
+    for family_id, data in paralog_groups.items():
+        source_category = source_category_for(family_id)
+        if source_category not in updated_counts:
+            logger.warning(
+                'Could not determine a First_core category for %s from %s',
+                family_id,
+                options.gene_groups_input,
+            )
+            continue
+        updated_counts[source_category] -= 1
+        total_gene_groups += max(0, len(data['sizes']) - 1)
         for size in data['sizes']:
-            if size >= math.floor(99 * genome_num / 100):
-                new_core_99 += 1
-            elif size >= math.floor(95 * genome_num / 100):
-                new_core_95 += 1
-            elif size >= math.floor(15 * genome_num / 100):
-                new_core_15 += 1
-            elif size >= math.floor(0 * genome_num / 100):
-                new_core_0 += 1
+            selected_bin = next(
+                (
+                    percentage for percentage in percentage_bins
+                    if size >= (0 if percentage == 0 else math.ceil(percentage * genome_num / 100))
+                ),
+                percentage_bins[-1],
+            )
+            target = f'First_core_{selected_bin}'
+            updated_counts.setdefault(target, 0)
+            updated_counts[target] += 1
 
-
-
-
-    # Write out the new summary statistics - put the recalculated stats into Group_Splitting
-    stats_out = os.path.join(options.base_output, os.path.basename(summary_file).replace('.txt','_recalculated.txt'))
-    key_order = ['First_core_', 'extended_core_', 'combined_core_', 'Second_core_','only_Second_core_']
-    with open(stats_out, 'w') as outfile:
-        print("Number of Genomes: " + str(options.genome_num))
-        outfile.write("Number of Genomes: " + str(options.genome_num) + "\n")
-        print("Reclaculated Gene Groups:")
-        outfile.write("Recalculated Gene Groups\n")
-        print(f"First_core_99: {new_core_99}")
-        outfile.write(f"First_core_99: {new_core_99}\n")
-        print(f"First_core_95: {new_core_95}")
-        outfile.write(f"First_core_95: {new_core_95}\n")
-        print(f"First_core_15: {new_core_15}")
-        outfile.write(f"First_core_15: {new_core_15}\n")
-        print(f"First_core_0: {new_core_0}")
-        outfile.write(f"First_core_0: {new_core_0}\n")
-        print("Total Number of First Gene Groups (Including Singletons): " + str(total_gene_groups))
-        outfile.write("Total Number of First Gene Groups (Including Singletons): " + str(total_gene_groups))
+    stats_out = os.path.join(
+        options.base_output,
+        os.path.basename(summary_file).replace('.txt', '_recalculated.txt'),
+    )
+    with open(stats_out, 'w', encoding='utf-8') as outfile:
+        outfile.write(f'Number of Genomes: {genome_num}\n')
+        outfile.write('Recalculated Gene Groups\n')
+        for category, count in updated_counts.items():
+            outfile.write(f'{category}: {count}\n')
+            logger.info('%s: %s', category, count)
+        outfile.write(
+            f'Total Number of First Gene Groups (Including Singletons): {total_gene_groups}\n'
+        )
 
     # Alignment
     if options.align_core != None:
         logger.info("Processing gene group alignment")
-        group_directory = options.gene_groups_output
+        group_directory = options.gene_groups_input
         sub_group_directory = options.sub_groups_output
-        genome_list = read_genomes_from_fasta(options.gene_groups_output + '/combined_group_sequences_dna.fasta')
+        combined_groups_fasta = os.path.join(options.gene_groups_input, f"combined_group_sequences_{options.groups}_dna.fasta")
+        genome_list = read_genomes_from_fasta(combined_groups_fasta)
         process_gene_groups(options, group_directory, sub_group_directory, paralog_groups, genome_list, 'concatenated_genes_post_splitting_aligned_dna.fasta')
 
 

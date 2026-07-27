@@ -5,10 +5,14 @@ try:
     from .constants import *
     from .clusterings import *
     from .utils import *
+    from .visualisations import write_pangenome_visualisations
+    from .workflow import run_pangenome_workflow
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from constants import *
     from clusterings import *
     from utils import *
+    from visualisations import write_pangenome_visualisations
+    from workflow import run_pangenome_workflow
 
 
 def gene_presence_absence_output(options, genus_dict, pangenome_clusters_First_sorted, pangenome_clusters_First_sequences_sorted):
@@ -109,14 +113,14 @@ def calc_First_only_core(cluster, First_num,  cores):
         cores['First_genera_>'].append(cluster)
 #@profile
 def calc_single_First_extended_Second_only_core(cluster, First_num, cores, Second_num): # Count gene families extended with StORFs
-    group = First_num + Second_num
+    group = int(First_num) + int(Second_num)
     try:
         cores['extended_genera_' + str(group)].append(cluster)
     except KeyError:
         cores['extended_genera_>'].append(cluster)
 #@profile
 def calc_multi_First_extended_Second_only_core(cluster, First_num, cores, Second_num): # Count seperately those gene families extended with StORF-Reporter but combined >1 PEP
-    group = First_num + Second_num
+    group = int(First_num) + int(Second_num)
     try:
         cores['combined_genera_' + str(group)].append(cluster)
     except KeyError:
@@ -139,11 +143,15 @@ def calc_only_Second_only_core(cluster, cores, Second_num): # only count the tru
 #@profile
 def cluster(options):
 
+    return run_pangenome_workflow(options, 'Genus')
+
     print("Loading cluster file...")
     if options.cluster_format == 'CD-HIT':
         genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_CDHIT(options, '_')
-    elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
-        genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_EdgeList(options, '_')
+    elif 'BLAST' in options.cluster_format:
+        genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_BLAST(options, '_')
+    elif 'MMseqs' in options.cluster_format:
+        genus_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps = cluster_MMseqs(options, '_')
     print(f"Loaded {len(pangenome_clusters_First):,} clusters across {len(genus_dict):,} genera")
 
     ###
@@ -154,11 +162,11 @@ def cluster(options):
         print("Loading reclustered file...")
         if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genus_dict, '_')
-        elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
+        elif 'BLAST' in options.cluster_format or 'MMseqs' in options.cluster_format or 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
             combined_pangenome_clusters_First_Second_clustered,not_Second_only_cluster_ids,combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_Edge_List(options, '_')
         print(f"Loaded {len(combined_pangenome_clusters_Second):,} reclustered groups")
         print("Counting combined clusters...")
-        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, '_')
+        pangenome_clusters_Type = combined_clustering_counting(options, pangenome_clusters_First, reps, combined_pangenome_clusters_First_Second_clustered, pangenome_clusters_First_genomes, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences, '_')
     else:
         print("Counting clusters...")
         pangenome_clusters_Type = single_clustering_counting(pangenome_clusters_First, reps)
@@ -280,6 +288,19 @@ def cluster(options):
     if getattr(options, 'core_group_table', False):
         write_core_group_table(options, cores, pangenome_clusters_First_sequences_sorted)
 
+    if getattr(options, 'visualise', False):
+        visual_dir = write_pangenome_visualisations(
+            options,
+            genus_dict,
+            cores,
+            pangenome_clusters_First_sorted,
+            pangenome_clusters_First_sequences_sorted,
+            mode_label='Genus',
+            taxa_label='genera',
+        )
+        if visual_dir:
+            print(f"Pangenome visualisations written to {visual_dir}")
+
     if options.run_mode == 'Full':
         if options.reclustered == None:
             combined_pangenome_clusters_Second_sequences = None
@@ -314,7 +335,4 @@ def cluster(options):
     #!!# - Currently only align in Species Mode
     #if options.align_core != None and options.fasta != None and options.write_groups != None:
     #    process_gene_families(options, os.path.join(output_path, 'Gene_Families_Output'), 'concatenated_genes_aligned.fasta')
-
-
-
 

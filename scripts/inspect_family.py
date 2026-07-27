@@ -31,7 +31,6 @@ relative to this script (standard project layout).
 import argparse
 import csv
 import os
-import runpy
 import sys
 from pathlib import Path
 from collections import defaultdict, Counter
@@ -62,15 +61,13 @@ def main():
     parser.add_argument('--verbose', action='store_true')
     args = parser.parse_args()
 
-    # locate the location_tracking module file relative to this script
-    script_dir = Path(__file__).resolve().parent
-    lt_path = script_dir.joinpath('..', 'src', 'PyamilySeq', 'location_tracking.py').resolve()
-    if not lt_path.exists():
-        print(f'ERROR: location_tracking.py not found at expected path: {lt_path}', file=sys.stderr)
-        sys.exit(1)
-
-    # load the module functions using runpy
-    mod = runpy.run_path(str(lt_path))
+    try:
+        from PyamilySeq import location_tracking as location_module
+    except ImportError as error:
+        raise SystemExit(
+            'PyamilySeq is not importable. Install the package or run with PYTHONPATH=src.'
+        ) from error
+    mod = vars(location_module)
     parse_gff = mod.get('parse_gff')
     parse_gff_dir = mod.get('parse_gff_dir')
     parse_clusters = mod.get('parse_clusters')
@@ -145,7 +142,7 @@ def main():
     ctx_out = outdir / f'{args.family}_neighbors_contexts.tsv'
 
     # write occurrences and summary
-    occ_fieldnames = ['family_id', 'gene_id', 'raw_id', 'genome', 'contig', 'start', 'end', 'strand', 'ordinal_index', 'relative_index', 'contig_gene_count', 'neighbors_up', 'neighbors_down']
+    occ_fieldnames = list(occ_rows[0].keys()) if occ_rows else list(mod.get('OCCURRENCE_FIELDS', []))
     write_csv_rows(str(occ_out), occ_rows, occ_fieldnames)
     # summary may have different fieldnames
     if sum_rows:
@@ -483,4 +480,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

@@ -1,4 +1,5 @@
 from collections import defaultdict
+import hashlib
 import logging
 import os
 
@@ -14,13 +15,13 @@ def read_cd_hit_output(clstr_file):
     Returns a dictionary where keys are sequence headers and values are cluster IDs.
     """
     seq_to_cluster = {}  # Maps sequence header -> cluster ID
-    cluster_id = 0  # Generic ID for clusters (since CD-HIT names don't matter)
+    cluster_id = None
 
     with open(clstr_file, 'r') as f:
         for line in f:
             line = line.strip()
             if line.startswith(">Cluster"):
-                cluster_id += 1  # Increment cluster ID
+                cluster_id = line.split(None, 1)[1]
             elif line:
                 parts = line.split('\t')
                 if len(parts) > 1:
@@ -45,51 +46,45 @@ def compare_cd_hit_clusters(file1, file2, output_file):
     for seq, cluster_id in clusters2.items():
         grouped_clusters2[cluster_id].add(seq)
 
-    # Initialize metrics counters
-    cluster_name_changes = 0
+    def signatures(grouped):
+        result = {}
+        for cluster_id, members in grouped.items():
+            digest = hashlib.sha256('\0'.join(sorted(members)).encode('utf-8')).hexdigest()[:12]
+            result[cluster_id] = digest
+        return result
+
+    signatures1 = signatures(grouped_clusters1)
+    signatures2 = signatures(grouped_clusters2)
     sequence_shifts = 0
     only_in_file1 = defaultdict(list)
     only_in_file2 = defaultdict(list)
-    cluster_mismatches = defaultdict(list)
 
     # Prepare data for the TSV output
     tsv_data = []
 
-    # Track changes
-    for seq, cluster_id in clusters1.items():
-        if seq not in clusters2:
-            only_in_file1[cluster_id].append(seq)
-            tsv_data.append([seq, cluster_id, "NA", "Only in file1"])
-        elif clusters2[seq] != cluster_id:
-            # Sequence shifts: sequence in different clusters between files
+    for seq in sorted(set(clusters1) | set(clusters2)):
+        cluster1 = clusters1.get(seq)
+        cluster2 = clusters2.get(seq)
+        if cluster1 is None:
+            only_in_file2[cluster2].append(seq)
+            tsv_data.append([seq, 'NA', cluster2, 'Only in file2'])
+        elif cluster2 is None:
+            only_in_file1[cluster1].append(seq)
+            tsv_data.append([seq, cluster1, 'NA', 'Only in file1'])
+        elif grouped_clusters1[cluster1] != grouped_clusters2[cluster2]:
             sequence_shifts += 1
-            cluster_mismatches[seq].append((cluster_id, clusters2[seq]))
-            tsv_data.append([seq, cluster_id, clusters2[seq], "Mismatch"])
+            tsv_data.append([seq, cluster1, cluster2, 'Partition mismatch'])
 
-    for seq, cluster_id in clusters2.items():
-        if seq not in clusters1:
-            only_in_file2[cluster_id].append(seq)
-            tsv_data.append([seq, "NA", cluster_id, "Only in file2"])
-        elif clusters1[seq] != cluster_id:
-            # Sequence shifts: sequence in different clusters between files
-            sequence_shifts += 1
-            cluster_mismatches[seq].append((clusters1[seq], cluster_id))
-            tsv_data.append([seq, clusters1[seq], cluster_id, "Mismatch"])
-
-    # Track cluster name changes (same sequences in different clusters)
-    for cluster_id1, seqs1 in grouped_clusters1.items():
-        for cluster_id2, seqs2 in grouped_clusters2.items():
-            if seqs1 == seqs2 and cluster_id1 != cluster_id2:
-                cluster_name_changes += 1
-                for seq in seqs1:
-                    tsv_data.append([seq, cluster_id1, cluster_id2, "Cluster name change"])
+    equivalent_partitions = len(
+        set(signatures1.values()) & set(signatures2.values())
+    )
 
     # Print metrics
     logger.info("Clustering Comparison Metrics:")
-    logger.info("Cluster name changes: %s", cluster_name_changes)
+    logger.info("Equivalent family partitions: %s", equivalent_partitions)
     logger.info("Sequence shifts (sequences assigned to different clusters): %s", sequence_shifts)
-    logger.info("Sequences only in the first file: %s", len(only_in_file1))
-    logger.info("Sequences only in the second file: %s", len(only_in_file2))
+    logger.info("Sequences only in the first file: %s", sum(map(len, only_in_file1.values())))
+    logger.info("Sequences only in the second file: %s", sum(map(len, only_in_file2.values())))
 
     # Write the results to a TSV file
     with open(output_file, 'w') as out_file:

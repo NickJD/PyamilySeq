@@ -49,11 +49,11 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         else:
             ret = subprocess.run(cdhit_command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         if ret.returncode != 0:
-            logger.error("cd-hit returned non-zero exit code %s", ret.returncode)
-        else:
-            logger.info("cd-hit completed successfully: %s", clustering_output)
+            raise RuntimeError(f"{clustering_mode} returned non-zero exit code {ret.returncode}")
+        logger.info("cd-hit completed successfully: %s", clustering_output)
     except Exception as e:
         logger.exception("Failed to run cd-hit: %s", e)
+        raise
 
 
 def main():
@@ -108,7 +108,7 @@ def main():
     partial_parser.add_argument("-reclustered", required=False,
                                 help="Clustering output file from a second round of clustering.")
     partial_parser.add_argument("-seq_tag", default="StORF", dest="sequence_tag", required=False,
-                                help="Tag for distinguishing reclustered sequences.")
+                                help="Legacy compatibility label; reclustering provenance is inferred from first-round membership.")
 
     # Common Grouping Arguments
     for subparser in [full_parser, partial_parser]:
@@ -139,9 +139,45 @@ def main():
                                help=("Allow up to this percentage (0-100) of genomes in a family to have multi-copies. "
                                      "If >0, families with multi-copy genomes less than or equal to this percentage are kept."))
         subparser.add_argument("-gene_group_table", action="store_true", dest="gene_group_table",
-                               help="Output a tab-separated file mapping each gene to its gene family group name (e.g. group_0, group_1, ...).")
+                               help="Output a tab-separated gene-to-family map using stable hashed family IDs.")
         subparser.add_argument("-core_group_table", action="store_true", dest="core_group_table",
-                               help="Output a tab-separated file mapping each gene to its assigned core category (e.g. Group_1, Group_2, ...).")
+                               help="Output a tab-separated gene-to-prevalence-category map.")
+        subparser.add_argument("-visualise", "--visualize", action="store_true", dest="visualise",
+                               help="Write SVG/HTML visual summaries of the pangenome outputs.")
+        subparser.add_argument("-visualise_heatmap_limit", "--visualize-heatmap-limit", type=int, default=200,
+                               dest="visualise_heatmap_limit",
+                               help="Maximum number of gene families to show in the presence/absence heatmap (default: 200).")
+        subparser.add_argument("--visualize-permutations", type=int, default=100, dest="visualise_permutations",
+                               help="Permutation count for deterministic pangenome accumulation curves (default: 100).")
+        subparser.add_argument("--visualize-seed", type=int, default=1, dest="visualise_seed",
+                               help="Random seed for pangenome accumulation curves (default: 1).")
+        subparser.add_argument("--taxon-map",
+                               help="Optional two/three-column identifier-to-taxon mapping, recommended for Genus mode.")
+        subparser.add_argument("--sequence-delimiter", default="|",
+                               help="Delimiter between genome and gene in sequence IDs (default: '|').")
+        subparser.add_argument("--blast-graph-mode", choices=["reciprocal-best", "connected-components"],
+                               default="reciprocal-best",
+                               help="How scored BLAST hits are converted into family edges (default: reciprocal-best).")
+        subparser.add_argument("--blast-min-identity", type=float, default=0.0,
+                               help="Minimum BLAST percent identity (default: 0).")
+        subparser.add_argument("--blast-max-evalue", type=float, default=10.0,
+                               help="Maximum BLAST e-value (default: 10).")
+        subparser.add_argument("--blast-min-query-coverage", type=float, default=0.0,
+                               help="Minimum query coverage percentage; requires qlen in --blast-columns.")
+        subparser.add_argument("--blast-min-subject-coverage", type=float, default=0.0,
+                               help="Minimum subject coverage percentage; requires slen in --blast-columns.")
+        subparser.add_argument(
+            "--blast-columns",
+            default="qseqid,sseqid,pident,length,mismatch,gapopen,qstart,qend,sstart,send,evalue,bitscore",
+            help="Comma-separated BLAST column names matching the input file.",
+        )
+        # Mirror global options so argparse accepts them before or after the subcommand.
+        subparser.add_argument("--log", action="store_true", dest="log", default=argparse.SUPPRESS,
+                               help="Create a timestamped logfile for this run.")
+        subparser.add_argument("--log-dir", dest="log_dir", default=argparse.SUPPRESS,
+                               help="Directory for logfile (default: output dir or cwd).")
+        subparser.add_argument("-verbose", action="store_true", default=argparse.SUPPRESS,
+                               help="Print verbose output.")
 
     # Miscellaneous Arguments
     # Global logging options (user controls logfile creation)
@@ -174,13 +210,18 @@ def main():
         required_full_mode = [options.input_type, options.pident, options.len_diff]
         if options.input_type != 'fasta':
             required_full_mode.extend([options.input_dir, options.name_split_gff])
+        else:
+            required_full_mode.append(options.input_fasta)
         if all(required_full_mode):
             # Proceed with the Full mode
             pass
         else:
-            missing_options = [opt for opt in
-                               ['input_type', 'input_dir', 'name_split_gff', 'clustering_format', 'pident', 'len_diff'] if
-                               not options.__dict__.get(opt)]
+            required_names = ['input_type', 'pident', 'len_diff']
+            if options.input_type == 'fasta':
+                required_names.append('input_fasta')
+            else:
+                required_names.extend(['input_dir', 'name_split_gff'])
+            missing_options = [opt for opt in required_names if not options.__dict__.get(opt)]
             logger.error("Missing required options for Full mode: %s", ', '.join(missing_options))
             sys.exit(f"Missing required options for Full mode: {', '.join(missing_options)}")
         if options.align_core:
@@ -217,24 +258,21 @@ def main():
             logger.info("mafft is installed. Proceeding with alignment.")
         else:
             logger.error("mafft is not installed. Please install mafft to proceed.")
-            exit("mafft is not installed. Please install mafft to proceed.")
+            sys.exit("mafft is not installed. Please install mafft to proceed.")
     ##CD-HIT
     if options.run_mode == 'Full':
-        if is_tool_installed('cd-hit'):
-            logger.info("cd-hit is installed. Proceeding with clustering.")
-            if options.sequence_type == 'DNA':
-                clustering_mode = 'cd-hit-est'
-            elif options.sequence_type == 'AA':
-                clustering_mode = 'cd-hit'
+        clustering_mode = 'cd-hit-est' if options.sequence_type == 'DNA' else 'cd-hit'
+        if is_tool_installed(clustering_mode):
+            logger.info("%s is installed. Proceeding with clustering.", clustering_mode)
             if options.fast_mode == True:
-                options.fast_mode = 1
+                options.fast_mode = 0
                 logger.info("Running CD-HIT in fast mode.")
             else:
-                options.fast_mode = 0
+                options.fast_mode = 1
                 logger.info("Running CD-HIT in accurate mode.")
         else:
-            logger.error("cd-hit is not installed. Please install cd-hit to proceed.")
-            exit("cd-hit is not installed. Please install cd-hit to proceed.")
+            logger.error("%s is not installed. Please install CD-HIT to proceed.", clustering_mode)
+            sys.exit(f"{clustering_mode} is not installed. Please install CD-HIT to proceed.")
 
     if hasattr(options, 'cluster_file') and options.cluster_file:
         options.cluster_file = fix_path(options.cluster_file)
@@ -244,6 +282,8 @@ def main():
         options.input_dir = fix_path(options.input_dir)
     if hasattr(options, 'output_dir') and options.output_dir:
         options.output_dir = fix_path(options.output_dir)
+    if getattr(options, 'taxon_map', None):
+        options.taxon_map = fix_path(options.taxon_map)
 
     output_path = os.path.abspath(options.output_dir)
     combined_out_file = os.path.join(output_path, "combined_sequences_dna.fasta")
@@ -255,13 +295,13 @@ def main():
     elif options.group_mode == 'Genus':
         options.genus_groups = options.genus_groups + ',>'
         groups_to_use = options.genus_groups
-        if options.align_core != None:
+        if options.align_core:
             sys.exit("-a align_core not a valid option in Genus mode.")
 
 
     if options.run_mode == 'Full':
         if getattr(options, "clustering_format", "").upper() != "CD-HIT":
-            sys.exit('Only CD-HIT clsutering works in Full Mode')
+            sys.exit('Only CD-HIT clustering works in Full Mode')
 
         if not os.path.exists(output_path):
             os.makedirs(output_path)
@@ -301,6 +341,7 @@ def main():
                 self.reclustered = None
                 self.sequence_tag = None
                 self.species_groups = groups_to_use
+                self.core_groups = groups_to_use
                 self.clusters = clustering_output + clust_affix
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
@@ -316,6 +357,18 @@ def main():
                 self.single_copy_tolerance = options.single_copy_tolerance
                 self.gene_group_table = options.gene_group_table
                 self.core_group_table = options.core_group_table
+                self.visualise = options.visualise
+                self.visualise_heatmap_limit = options.visualise_heatmap_limit
+                self.visualise_permutations = options.visualise_permutations
+                self.visualise_seed = options.visualise_seed
+                self.taxon_map = options.taxon_map
+                self.sequence_delimiter = options.sequence_delimiter
+                self.blast_graph_mode = options.blast_graph_mode
+                self.blast_min_identity = options.blast_min_identity
+                self.blast_max_evalue = options.blast_max_evalue
+                self.blast_min_query_coverage = options.blast_min_query_coverage
+                self.blast_min_subject_coverage = options.blast_min_subject_coverage
+                self.blast_columns = options.blast_columns
 
         clustering_options = clustering_options()
 
@@ -330,6 +383,7 @@ def main():
                 self.reclustered = options.reclustered
                 self.sequence_tag = options.sequence_tag
                 self.species_groups = groups_to_use
+                self.core_groups = groups_to_use
                 self.clusters = options.cluster_file
                 self.output_dir = options.output_dir
                 self.gene_presence_absence_out = options.gene_presence_absence_out
@@ -345,6 +399,18 @@ def main():
                 self.single_copy_tolerance = options.single_copy_tolerance
                 self.gene_group_table = options.gene_group_table
                 self.core_group_table = options.core_group_table
+                self.visualise = options.visualise
+                self.visualise_heatmap_limit = options.visualise_heatmap_limit
+                self.visualise_permutations = options.visualise_permutations
+                self.visualise_seed = options.visualise_seed
+                self.taxon_map = options.taxon_map
+                self.sequence_delimiter = options.sequence_delimiter
+                self.blast_graph_mode = options.blast_graph_mode
+                self.blast_min_identity = options.blast_min_identity
+                self.blast_max_evalue = options.blast_max_evalue
+                self.blast_min_query_coverage = options.blast_min_query_coverage
+                self.blast_min_subject_coverage = options.blast_min_subject_coverage
+                self.blast_columns = options.blast_columns
 
         clustering_options = clustering_options()
 

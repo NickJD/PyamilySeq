@@ -1,6 +1,12 @@
 import os
 import csv
 import logging
+import re
+
+try:
+    from .families import read_fasta_records
+except ImportError:
+    from families import read_fasta_records
 
 # Use centralissed logger factory from constants
 try:
@@ -13,22 +19,7 @@ def parse_fasta(fasta_file):
     """
     Parses a FASTA file and returns a dictionary of gene IDs and sequences.
     """
-    sequences = {}
-    with open(fasta_file, 'r') as f:
-        gene_id = None
-        sequence = []
-        for line in f:
-            line = line.strip()
-            if line.startswith(">"):
-                if gene_id:  # Save the previous gene
-                    sequences[gene_id] = ''.join(sequence)
-                gene_id = line[1:].split()[0].split('|')[1].replace('ENSB_','')  # Extract the gene ID after ">"
-                sequence = []
-            else:
-                sequence.append(line)
-        if gene_id:  # Save the last gene
-            sequences[gene_id] = ''.join(sequence)
-    return sequences
+    return read_fasta_records(fasta_file)
 
 
 def parse_csv(csv_file):
@@ -38,12 +29,16 @@ def parse_csv(csv_file):
     groups = {}
     with open(csv_file, 'r') as f:
         reader = csv.reader(f, delimiter=',')  # Assuming tab-delimited CSV
-        next(reader)  # Skip the first line
+        header = next(reader)
+        genome_names = header[14:]
         for row in reader:
             group_id = row[0]
-            gene_ids = row[14:]  # Read from column 14 onward
-            gene_ids = [gene.strip() for genes in gene_ids for gene in genes.split(';') if
-                        gene.strip()]  # Flatten and clean
+            gene_ids = []
+            for genome, cell in zip(genome_names, row[14:]):
+                for gene in re.split(r'[,;\s]+', cell.strip()):
+                    if not gene:
+                        continue
+                    gene_ids.append(gene if '|' in gene else f'{genome}|{gene}')
             groups[group_id] = gene_ids
     return groups
 
@@ -54,12 +49,20 @@ def write_group_fastas(groups, sequences, output_dir):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    by_gene = {}
+    for sequence_id in sequences:
+        gene = sequence_id.split('|', 1)[-1]
+        by_gene.setdefault(gene, []).append(sequence_id)
     for group_id, gene_ids in groups.items():
         group_file = os.path.join(output_dir, f"{group_id}.fasta")
         with open(group_file, 'w') as f:
             for gene_id in gene_ids:
-                if gene_id in sequences:
-                    f.write(f">{gene_id}\n{sequences[gene_id]}\n")
+                sequence_id = gene_id if gene_id in sequences else None
+                if sequence_id is None:
+                    matches = by_gene.get(gene_id.split('|', 1)[-1], [])
+                    sequence_id = matches[0] if len(matches) == 1 else None
+                if sequence_id:
+                    f.write(f">{sequence_id}\n{sequences[sequence_id]}\n")
                 else:
                     logger.warning("Warning: Gene ID %s not found in FASTA file.", gene_id)
 

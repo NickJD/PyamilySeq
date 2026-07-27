@@ -67,15 +67,20 @@ def parse_pyamily_matrix(matrix_file):
     rows = gene families
     columns = genomes or gene IDs depending on PyamilySeq output
     """
-    df = pd.read_csv(matrix_file, sep="\t", index_col=0)
-    return df
+    raw = pd.read_csv(matrix_file, sep=None, engine="python")
+    if raw.columns[0] == "Gene" and len(raw.columns) > 14:
+        families = raw.iloc[:, 0].astype(str)
+        matrix = raw.iloc[:, 14:].copy()
+        matrix.index = families
+        return matrix
+    return raw.set_index(raw.columns[0])
 
 
 def build_presence_absence(df):
     """
     force binary presence/absence
     """
-    return df.astype(bool).astype(int)
+    return ((~df.isna()) & (df.astype(str).apply(lambda column: column.str.strip()) != '')).astype(int)
 
 
 def filter_singletons(df):
@@ -166,13 +171,17 @@ def main():
     if args.remove_group_specific:
         df = filter_group_specific(df, genome2tax, mode="remove")
 
+    wide = attach_metadata(df, genome2tax)
     if args.format == "long":
-        out = attach_metadata(df, genome2tax)
+        out = wide.melt(
+            id_vars=["Genome", "Group"],
+            var_name="Gene_Family",
+            value_name="Present",
+        )
     else:
-        df.insert(0, "Group", [genome2tax.get(g, "NA") for g in df.columns])
-        out = df
+        out = wide
 
-    out.to_csv(args.output, sep="\t")
+    out.to_csv(args.output, sep="\t", index=False)
 
 
 if __name__ == "__main__":

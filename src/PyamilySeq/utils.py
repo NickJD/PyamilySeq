@@ -9,6 +9,7 @@ import re
 import math
 import logging
 import argparse
+import gzip
 
 logger = logging.getLogger("PyamilySeq")  # Use the shared top-level PyamilySeq logger so all utils logs propagate to the same handlers
 
@@ -83,24 +84,53 @@ codon_table = {
       'TAC':'Y', 'TAT':'Y', 'TAA':'*', 'TAG':'*',
       'TGC':'C', 'TGT':'C', 'TGA':'*', 'TGG':'W'}
 
-# Temp fix
-codon_table['TAA'] = ''
-codon_table['TGA'] = ''
-codon_table['TAG'] = ''
-
 def translate_frame(sequence):
+    sequence = ''.join(str(sequence).split()).upper().replace('U', 'T')
     translate = ''.join([codon_table.get(sequence[3 * i:3 * i + 3], 'X') for i in range(len(sequence) // 3)])
     return translate
 
+def _open_text(path, mode='rt'):
+    opener = gzip.open if str(path).lower().endswith('.gz') else open
+    return opener(path, mode)
+
+
+def normalise_gene_identifiers(gene_ident):
+    if gene_ident is None:
+        return []
+    if isinstance(gene_ident, str):
+        return [item.strip() for item in gene_ident.split(',') if item.strip()]
+    return [str(item).strip() for item in gene_ident if str(item).strip()]
+
+
+def feature_matches_gene_ident(feature_type, gene_ident):
+    idents = normalise_gene_identifiers(gene_ident)
+    if not idents:
+        return False
+    return str(feature_type).lower() in {ident.lower() for ident in idents}
+
+
+def _extract_gff_identifier(attributes):
+    parsed = {}
+    for token in (part.strip() for part in attributes.strip().split(';') if part.strip()):
+        if '=' in token:
+            key, value = token.split('=', 1)
+        elif ' ' in token:
+            key, value = token.split(None, 1)
+            value = value.strip('"')
+        else:
+            continue
+        parsed[key.strip()] = value.strip().strip('"')
+    for key in ('ID', 'locus_tag', 'protein_id', 'gene', 'Name', 'Parent'):
+        if parsed.get(key):
+            return parsed[key].split(',')[0]
+    raise ValueError(f"GFF feature has no supported identifier attribute: {attributes.strip()}")
+
+
 def translate_dna_to_aa(dna_fasta, aa_fasta):
     def translate_dna_sequence(dna_seq):
-        aa_seq = ""
-        for i in range(0, len(dna_seq) - 2, 3):
-            codon = dna_seq[i:i+3]
-            aa_seq += codon_table.get(codon, 'X')  # 'X' for unknown codons
-        return aa_seq
+        return translate_frame(dna_seq)
 
-    with open(dna_fasta, 'r') as infile, open(aa_fasta, 'w') as outfile:
+    with _open_text(dna_fasta, 'rt') as infile, open(aa_fasta, 'w') as outfile:
         dna_seq = ""
         header = ""
         for line in infile:
@@ -120,18 +150,21 @@ def translate_dna_to_aa(dna_fasta, aa_fasta):
 
 
 def detect_sequence_type(fasta_file):
-    import gzip
-    opener = gzip.open if str(fasta_file).lower().endswith('.gz') else open
-    with opener(fasta_file, 'rt') as f:
+    observed = []
+    with _open_text(fasta_file, 'rt') as f:
         for line in f:
             if line.startswith('>'):
                 continue
-            line = line.strip().upper()
-            if not line:
-                continue
-            if any(base in line for base in 'EFILPQZ'):
-                return False  # Contains amino acids
-    return True  # Contains DNA
+            observed.extend(character for character in line.strip().upper() if character.isalpha())
+            if len(observed) >= 10000:
+                break
+    if not observed:
+        raise ValueError(f"No sequence characters found in {fasta_file}")
+    amino_acid_only = set(observed) - set('ACGTUNRYKMSWBDHV')
+    if amino_acid_only:
+        return False
+    canonical_fraction = sum(character in 'ACGTUN' for character in observed) / len(observed)
+    return canonical_fraction >= 0.85
 
 
 def is_tool_installed(tool_name):
@@ -189,7 +222,7 @@ def wrap_sequence(sequence, width=60):
 
 def read_genomes_from_fasta(fasta_file):
     genomes = set()
-    with open(fasta_file, 'r') as file:
+    with _open_text(fasta_file, 'rt') as file:
         for line in file:
             line = line.strip()
             if line.startswith('>'):
@@ -200,15 +233,26 @@ def read_genomes_from_fasta(fasta_file):
 def read_fasta(fasta_file):
     sequences = {}
     current_sequence = None
-    with open(fasta_file, 'r') as file:
-        for line in file:
+    with _open_text(fasta_file, 'rt') as file:
+        for line_number, line in enumerate(file, start=1):
             line = line.strip()
             if not line:
                 continue  # Skip empty lines
             if line.startswith('>'):
-                current_sequence = line[1:]  # Remove '>' character
+                parts = line[1:].split(maxsplit=1)
+                if not parts:
+                    raise ValueError(f"Empty FASTA header at line {line_number} in {fasta_file}")
+                current_sequence = parts[0]
+                if current_sequence in sequences:
+                    raise ValueError(
+                        f"Duplicate FASTA identifier {current_sequence!r} at line {line_number} in {fasta_file}"
+                    )
                 sequences[current_sequence] = ''
             else:
+                if current_sequence is None:
+                    raise ValueError(
+                        f"Sequence data before first FASTA header at line {line_number} in {fasta_file}"
+                    )
                 sequences[current_sequence] += line
     return sequences
 
@@ -282,13 +326,15 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
         paired_files_found = None
     #with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
         gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff))
+        if not gff_files and not str(name_split_gff).endswith('.gz'):
+            gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff + '.gz'))
         if not gff_files:
             logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split_gff)
             sys.exit("Error: No GFF files found.")
         for gff_file in gff_files:
             genome_name = os.path.basename(gff_file).split(name_split_gff)[0]
             if name_split_fasta == None:
-                possible_extensions = ['.fa', '.fasta', '.fna']
+                possible_extensions = ['.fa', '.fasta', '.fna', '.fa.gz', '.fasta.gz', '.fna.gz']
                 corresponding_fasta_file = None
                 for ext in possible_extensions:
                     temp_file = os.path.splitext(gff_file)[0] + ext
@@ -306,26 +352,27 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
 
             gff_features = []
             paired_files_found = True
-            with open(gff_file, 'r') as file:
+            with _open_text(gff_file, 'rt') as file:
                 seen_seq_ids = collections.defaultdict(int)
                 lines = file.readlines()
                 for line in lines:
                     line_data = line.split('\t')
                     if len(line_data) == 9:
-                        if any(gene_type in line_data[2] for gene_type in gene_ident):
-                            seq_id = line_data[8].split('ID=')[1].split(';')[0]
+                        if feature_matches_gene_ident(line_data[2], gene_ident):
+                            seq_id = _extract_gff_identifier(line_data[8])
+                            original_seq_id = seq_id
                             contig = line_data[0]
                             feature = line_data[2]
                             strand = line_data[6]
                             start, end = int(line_data[3]), int(line_data[4])
-                            if seq_id in seen_seq_ids:
-                                seq_id += '_' + str(seen_seq_ids[seq_id])
-                                seen_seq_ids[seq_id] + 1
+                            if original_seq_id in seen_seq_ids:
+                                seq_id = original_seq_id + '_' + str(seen_seq_ids[original_seq_id])
+                                seen_seq_ids[original_seq_id] += 1
                             else:
-                                seen_seq_ids[seq_id] = 1
+                                seen_seq_ids[original_seq_id] = 1
                             gff_features.append((contig, start, end, strand, feature,  seq_id))
             fasta_dict = collections.defaultdict(str)
-            with open(corresponding_fasta_file, 'r') as file:
+            with _open_text(corresponding_fasta_file, 'rt') as file:
                 lines = file.readlines()
                 for line in lines:
                     if line.startswith('>'):
@@ -345,8 +392,8 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
                             full_sequence = fasta_dict[contig][0]
                             seq = full_sequence[start - 1:end]
                         elif strand == '-':
-                            corrected_start = max(len(fasta_dict[contig][0]) - int(end), 1)
-                            corrected_stop = max(len(fasta_dict[contig][0]) - int(start - 1), 1)
+                            corrected_start = max(len(fasta_dict[contig][0]) - int(end), 0)
+                            corrected_stop = max(len(fasta_dict[contig][0]) - int(start) + 1, 0)
                             full_sequence = fasta_dict[contig][1]
                             seq = full_sequence[corrected_start:corrected_stop]
 
@@ -389,6 +436,8 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
     aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
     with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
         gff_files = glob.glob(os.path.join(input_dir, '*' + name_split))
+        if not gff_files and not str(name_split).endswith('.gz'):
+            gff_files = glob.glob(os.path.join(input_dir, '*' + name_split + '.gz'))
         if not gff_files:
             logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split)
             sys.exit("Error: No GFF files found - check input directory and -name_split_gff parameter.")
@@ -396,7 +445,7 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
             genome_name = os.path.basename(gff_file).split(name_split)[0]
             fasta_dict = collections.defaultdict(str)
             gff_features = []
-            with open(gff_file, 'r') as file:
+            with _open_text(gff_file, 'rt') as file:
                 seen_seq_ids = collections.defaultdict(int)
                 lines = file.readlines()
                 fasta_section = False
@@ -413,17 +462,18 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
                     else:
                         line_data = line.split('\t')
                         if len(line_data) == 9:
-                            if any(gene_type in line_data[2] for gene_type in gene_ident):
+                            if feature_matches_gene_ident(line_data[2], gene_ident):
                                 contig = line_data[0]
                                 feature = line_data[2]
                                 strand = line_data[6]
                                 start, end = int(line_data[3]), int(line_data[4])
-                                seq_id = line_data[8].split('ID=')[1].split(';')[0]
-                                if seq_id in seen_seq_ids:
-                                    seq_id += '_' + str(seen_seq_ids[seq_id])
-                                    seen_seq_ids[seq_id] + 1
+                                seq_id = _extract_gff_identifier(line_data[8])
+                                original_seq_id = seq_id
+                                if original_seq_id in seen_seq_ids:
+                                    seq_id = original_seq_id + '_' + str(seen_seq_ids[original_seq_id])
+                                    seen_seq_ids[original_seq_id] += 1
                                 else:
-                                    seen_seq_ids[seq_id] = 1
+                                    seen_seq_ids[original_seq_id] = 1
                                 gff_features.append((contig, start, end, strand, feature,  seq_id))
 
                 for contig, fasta in fasta_dict.items():
@@ -437,8 +487,8 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
                                 full_sequence = fasta_dict[contig][0]
                                 seq = full_sequence[start - 1:end]
                             elif strand == '-':
-                                corrected_start = max(len(fasta_dict[contig][0]) - int(end), 1)
-                                corrected_stop = max(len(fasta_dict[contig][0]) - int(start - 1), 1)
+                                corrected_start = max(len(fasta_dict[contig][0]) - int(end), 0)
+                                corrected_stop = max(len(fasta_dict[contig][0]) - int(start) + 1, 0)
                                 full_sequence = fasta_dict[contig][1]
                                 seq = full_sequence[corrected_start:corrected_stop]
 
@@ -485,7 +535,7 @@ def read_fasta_files(input_dir, name_split_fasta, combined_out, translate, run_a
         for fasta_file in fasta_files:
             genome_name = os.path.basename(fasta_file).split(name_split_fasta)[0]
             fasta_dict = collections.defaultdict(str)
-            with open(fasta_file, 'r') as file:
+            with _open_text(fasta_file, 'rt') as file:
                 lines = file.readlines()
                 for line in lines:
                     if line.startswith('>'):
@@ -681,29 +731,37 @@ def write_groups_func(options, output_dir, key_order, cores, sequences,
 def perform_alignment(gene_path,group_directory, gene_file, options, concatenated_sequences, subgrouped):
     # Read sequences from the gene family file
     sequences = read_fasta(gene_path)
-    if len(sequences) == 1: # We can't align a single sequence
-        return concatenated_sequences
     # Select the longest sequence for each genome
     longest_sequences = select_longest_gene(sequences, subgrouped)
 
-    # Run mafft on the longest sequences
     aligned_file = f"{group_directory}/{gene_file}_aligned.fasta.tmp"
-    run_mafft_on_sequences(options, {seq_id: seq for seq_id, seq in longest_sequences.values()}, aligned_file)
-
-    # Read aligned sequences and concatenate them
-    aligned_sequences = read_fasta(aligned_file)
+    if len(longest_sequences) > 1:
+        run_mafft_on_sequences(
+            options,
+            {seq_id: seq for seq_id, seq in longest_sequences.values()},
+            aligned_file,
+        )
+        aligned_sequences = read_fasta(aligned_file)
+    else:
+        aligned_sequences = {
+            seq_id: sequence for seq_id, sequence in longest_sequences.values()
+        }
     # Find the length of the longest sequence in aligned_sequences
     max_length = max(len(seq) for seq in aligned_sequences.values())
 
-    for genome, sequence in concatenated_sequences.items():
-        if any(genome in key for key in aligned_sequences.keys()):
-            genome_name_in_aligned = next(key for key in aligned_sequences.keys() if genome in key)#.split('|')[split_by]
-            concatenated_sequences[genome] += aligned_sequences[genome_name_in_aligned]
-        else:
-            concatenated_sequences[genome] += "-" * max_length
+    aligned_by_genome = {}
+    for sequence_id, sequence in aligned_sequences.items():
+        parts = sequence_id.split('|')
+        aligned_genome = parts[1] if subgrouped and len(parts) > 1 else parts[0]
+        if aligned_genome in aligned_by_genome:
+            raise ValueError(f"Alignment contains multiple representatives for genome {aligned_genome}")
+        aligned_by_genome[aligned_genome] = sequence
+    for genome in concatenated_sequences:
+        concatenated_sequences[genome] += aligned_by_genome.get(genome, "-" * max_length)
 
     # Clean up aligned file
-    os.remove(aligned_file)
+    if os.path.exists(aligned_file):
+        os.remove(aligned_file)
 
     return concatenated_sequences
 
@@ -712,30 +770,64 @@ def process_gene_groups(options, group_directory, sub_group_directory, paralog_g
     """Process each gene family file to select the longest sequence per genome and concatenate aligned sequences."""
     concatenated_sequences = {genome: "" for genome in genome_list}
     output_file = group_directory.replace('Gene_Groups_Output', output_file)
-    if paralog_groups != None:
-     threshold_size = math.floor(int(options.align_core) * int(options.genome_num) / 100)
+    threshold_percent = int(
+        getattr(
+            options,
+            'align_core_threshold',
+            99 if getattr(options, 'align_core', False) is True else options.align_core,
+        )
+    )
+    threshold_size = math.ceil(threshold_percent * int(options.genome_num) / 100)
 
-    if options.align_aa == True:
+    if getattr(options, 'align_aa', False) == True:
      affix = '_aa.fasta'
     else:
      affix = '_dna.fasta'
 
-    if options.align_core == True:
-     # Iterate over each gene family file
-     for gene_file in os.listdir(group_directory):
-         if gene_file.endswith(affix) and not gene_file.startswith('combined_group_sequences'):
-             current_group = int(gene_file.split('_')[3].split('.')[0])
-             gene_path = os.path.join(group_directory, gene_file)
-             # Could add more catches here to work with First and Secondary groups - This ensures only core '99/100' are aligned
-             if 'First_core_99' in gene_file or 'First_core_100' in gene_file:
-                 # Check for matching group in paralog_groups
-                 if sub_group_directory and paralog_groups and '>Group_'+str(current_group) in paralog_groups:
-                     for subgroup, size in enumerate(paralog_groups['>Group_' + str(current_group)]['sizes']):
-                         if size >= threshold_size:
-                             gene_path = os.path.join(sub_group_directory,f"Group_{current_group}_subgroup_{subgroup}{affix}")
-                             concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, True)
-                 else:
-                     concatenated_sequences = perform_alignment(gene_path, group_directory, gene_file, options, concatenated_sequences, False)
+    if getattr(options, 'align_core', False):
+     for gene_file in sorted(os.listdir(group_directory)):
+         if not gene_file.endswith(affix) or gene_file.startswith('combined_group_sequences'):
+             continue
+         match = re.match(
+             r'^(?P<category>.+_core_(?P<percent>\d+))_(?P<family>group_[0-9a-f]+|\d+)_(?:dna|aa)\.fasta$',
+             gene_file,
+         )
+         if not match or int(match.group('percent')) < threshold_percent:
+             continue
+         family_id = match.group('family')
+         gene_path = os.path.join(group_directory, gene_file)
+         paralog_key = next(
+             (
+                 key for key in (f'>{family_id}', f'>Group_{family_id}')
+                 if paralog_groups and key in paralog_groups
+             ),
+             None,
+         )
+         if sub_group_directory and paralog_key:
+             for subgroup, size in enumerate(paralog_groups[paralog_key]['sizes']):
+                 if size < threshold_size:
+                     continue
+                 subgroup_path = os.path.join(
+                     sub_group_directory,
+                     f"{family_id}_subgroup_{subgroup}{affix}",
+                 )
+                 concatenated_sequences = perform_alignment(
+                     subgroup_path,
+                     group_directory,
+                     gene_file,
+                     options,
+                     concatenated_sequences,
+                     True,
+                 )
+         else:
+             concatenated_sequences = perform_alignment(
+                 gene_path,
+                 group_directory,
+                 gene_file,
+                 options,
+                 concatenated_sequences,
+                 False,
+             )
 
      # Write the concatenated sequences to the output file
      with open(output_file, 'w') as out:

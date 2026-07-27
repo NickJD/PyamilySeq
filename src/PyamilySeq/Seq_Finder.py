@@ -23,14 +23,15 @@ def parse_fasta_ids(fasta_file):
 def find_ids_in_csv(ids, csv_file):
     """Search for each ID in the CSV file and report the first column where it is found."""
     found_records = collections.defaultdict(list)
+    identifiers = set(ids)
     with open(csv_file, 'r') as f:
         csv_reader = csv.reader(f)
         for row in csv_reader:
-            if row:  # Ensure row is not empty
-
-                for id in ids: # slow
-                    if id in row:
-                        found_records[row[0]].append(id)
+            if not row:
+                continue
+            present = identifiers.intersection(row)
+            for identifier in sorted(present):
+                found_records[identifier].append(row[0])
     return found_records
 
 
@@ -63,10 +64,11 @@ def main():
     found_records = find_ids_in_csv(ids, options.csv_file)
 
     # Write output
-    with open(options.output_file, 'w') as output:
-        output.write("ID,Found_In_First_Column\n")
-        for seq_id, found_in in found_records.items():
-            output.write(f"{seq_id},{found_in}\n")
+    with open(options.output_file, 'w', newline='', encoding='utf-8') as output:
+        writer = csv.writer(output)
+        writer.writerow(["ID", "Found_In_First_Column"])
+        for seq_id, found_in in sorted(found_records.items()):
+            writer.writerow([seq_id, ';'.join(found_in)])
     logger.info("Wrote found records for %d IDs to %s", len(found_records), options.output_file)
 
 

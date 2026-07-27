@@ -1,6 +1,13 @@
 
 import copy
+import csv
 import os
+import re
+
+try:
+    from .families import read_fasta_records
+except ImportError:
+    from families import read_fasta_records
 
 # Use centralised logger factory
 try:
@@ -11,38 +18,34 @@ except Exception:
 def find_gene_ids_in_csv(csv_file, group_name):
     """Find gene IDs associated with the specified group name in the CSV file, starting from column 14."""
     gene_ids = []
-    with open(csv_file, 'r') as f:
-        for line in f:
-            cells = line.strip().split(',')
-            if cells[0].replace('"','') == group_name:
-                # Collect gene IDs from column 14 onward
-                # for cell in cells[14:]:
-                #     gene_ids.extend(cell.strip().replace('"','').split())  # Splitting by spaces if there are multiple IDs in a cell                break
-                for cell in cells[14:]:
-                    for gene in cell.strip().replace('"', '').split(';'):
+    with open(csv_file, newline='', encoding='utf-8') as f:
+        reader = csv.reader(f)
+        header = next(reader)
+        genomes = header[14:]
+        for row in reader:
+            if row and row[0] == group_name:
+                for genome, cell in zip(genomes, row[14:]):
+                    for gene in re.split(r'[,;\s]+', cell.strip()):
                         if gene:
-                            gene_ids.append(gene)
+                            gene_ids.append(gene if '|' in gene else f'{genome}|{gene}')
+                break
 
     return gene_ids
 
 def extract_sequences(fasta_file, gene_ids):
     """Extract sequences from the FASTA file that match the gene IDs."""
+    records = read_fasta_records(fasta_file)
+    by_gene = {}
+    for sequence_id in records:
+        by_gene.setdefault(sequence_id.split('|', 1)[-1], []).append(sequence_id)
     sequences = {}
-    capture = False
-    current_id = ""
-    not_found = copy.deepcopy(gene_ids)
-    with open(fasta_file, 'r') as f:
-        for line in f:
-            if line.startswith('>'):
-                # Extract the ID part after '>' and check if it's in gene_ids
-                current_id = line[1:].strip().split()[0].split('|')[1]
-                capture = current_id in gene_ids
-                if current_id in not_found:
-                    not_found.remove(current_id)
-                if capture:
-                    sequences[current_id] = [line.strip()]  # Start with header line
-            elif capture:
-                sequences[current_id].append(line.strip())  # Append sequence lines
+    for requested in gene_ids:
+        sequence_id = requested if requested in records else None
+        if sequence_id is None:
+            matches = by_gene.get(requested.split('|', 1)[-1], [])
+            sequence_id = matches[0] if len(matches) == 1 else None
+        if sequence_id:
+            sequences[sequence_id] = [f'>{sequence_id}', records[sequence_id]]
     return sequences
 
 def main():

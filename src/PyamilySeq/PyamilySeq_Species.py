@@ -6,10 +6,14 @@ try:
     from .constants import *
     from .clusterings import *
     from .utils import *
+    from .visualisations import write_pangenome_visualisations
+    from .workflow import run_pangenome_workflow
 except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
     from constants import *
     from clusterings import *
     from utils import *
+    from visualisations import write_pangenome_visualisations
+    from workflow import run_pangenome_workflow
 
 
 def gene_presence_absence_output(options, genome_dict,
@@ -26,10 +30,27 @@ def gene_presence_absence_output(options, genome_dict,
 
     # Track which Second cluster IDs have sequences that were merged into First clusters
     merged_second_cluster_ids = set()
+    sequence_to_first_cluster = {}
+    for first_cluster_id, first_sequences in pangenome_clusters_First_sequences_sorted.items():
+        for first_seq in first_sequences:
+            sequence_to_first_cluster[first_seq] = first_cluster_id
+
+    merged_first_cluster_ids = set()
+    if combined_pangenome_clusters_First_Second_clustered:
+        for clustered_values in combined_pangenome_clusters_First_Second_clustered.values():
+            for clustered_seq in clustered_values:
+                if options.sequence_tag and options.sequence_tag in clustered_seq:
+                    continue
+                source_cluster = sequence_to_first_cluster.get(clustered_seq)
+                if source_cluster is not None:
+                    merged_first_cluster_ids.add(source_cluster)
 
     # Process First clusters and their associated Second sequences
     for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
+        if cluster in merged_first_cluster_ids:
+            continue
         all_sequences = list(sequences)
+        all_sequences_seen = set(all_sequences)
         has_second_sequences = False
 
         # Add Second sequences that were clustered with this First cluster
@@ -37,16 +58,28 @@ def gene_presence_absence_output(options, genome_dict,
             for seq in sequences:
                 if seq in combined_pangenome_clusters_First_Second_clustered:
                     for clustered_seq in combined_pangenome_clusters_First_Second_clustered[seq]:
-                        if clustered_seq not in all_sequences:
-                            all_sequences.append(clustered_seq)
-                            # Check if this is a Second sequence (has the sequence_tag)
-                            if options.sequence_tag in clustered_seq:
-                                has_second_sequences = True
+                        # Check if this is a Second sequence (has the sequence_tag)
+                        if options.sequence_tag and options.sequence_tag in clustered_seq:
+                            has_second_sequences = True
+                            if clustered_seq not in all_sequences_seen:
+                                all_sequences.append(clustered_seq)
+                                all_sequences_seen.add(clustered_seq)
                             # Track which Second cluster this sequence came from
                             if combined_pangenome_clusters_Second_sequences_sorted:
                                 for second_cluster_id, second_seqs in combined_pangenome_clusters_Second_sequences_sorted.items():
                                     if clustered_seq in second_seqs:
                                         merged_second_cluster_ids.add(second_cluster_id)
+                        else:
+                            source_cluster = sequence_to_first_cluster.get(clustered_seq)
+                            if source_cluster is None:
+                                if clustered_seq not in all_sequences_seen:
+                                    all_sequences.append(clustered_seq)
+                                    all_sequences_seen.add(clustered_seq)
+                            else:
+                                for source_seq in pangenome_clusters_First_sequences_sorted[source_cluster]:
+                                    if source_seq not in all_sequences_seen:
+                                        all_sequences.append(source_seq)
+                                        all_sequences_seen.add(source_seq)
 
         # Calculate statistics based on number of genomes (not sequences)
         genomes_in_cluster = set()
@@ -143,14 +176,68 @@ def gene_presence_absence_output(options, genome_dict,
 
 
 
-def write_gene_group_table(options, pangenome_clusters_First_sequences_sorted):
+def write_gene_group_table(options, pangenome_clusters_First_sequences_sorted,
+                           combined_pangenome_clusters_First_Second_clustered=None,
+                           combined_pangenome_clusters_Second_sequences_sorted=None):
     output_path = os.path.abspath(options.output_dir)
     out_file = os.path.join(output_path, 'gene_group_table.tsv')
+    sequence_to_first_cluster = {}
+    for first_cluster_id, first_sequences in pangenome_clusters_First_sequences_sorted.items():
+        for first_seq in first_sequences:
+            sequence_to_first_cluster[first_seq] = first_cluster_id
+
+    merged_first_cluster_ids = set()
+    merged_second_cluster_ids = set()
+    if combined_pangenome_clusters_First_Second_clustered:
+        for clustered_values in combined_pangenome_clusters_First_Second_clustered.values():
+            for clustered_seq in clustered_values:
+                if options.sequence_tag and options.sequence_tag in clustered_seq:
+                    if combined_pangenome_clusters_Second_sequences_sorted:
+                        for second_cluster_id, second_seqs in combined_pangenome_clusters_Second_sequences_sorted.items():
+                            if clustered_seq in second_seqs:
+                                merged_second_cluster_ids.add(second_cluster_id)
+                else:
+                    source_cluster = sequence_to_first_cluster.get(clustered_seq)
+                    if source_cluster is not None:
+                        merged_first_cluster_ids.add(source_cluster)
+
     with open(out_file, 'w') as outfile:
         for cluster, sequences in pangenome_clusters_First_sequences_sorted.items():
-            group_name = f"group_{cluster}"
-            for seq in sequences:
+            if cluster in merged_first_cluster_ids:
+                continue
+            all_sequences = list(sequences)
+            all_sequences_seen = set(all_sequences)
+            has_second_sequences = False
+            if combined_pangenome_clusters_First_Second_clustered:
+                for seq in sequences:
+                    if seq not in combined_pangenome_clusters_First_Second_clustered:
+                        continue
+                    for clustered_seq in combined_pangenome_clusters_First_Second_clustered[seq]:
+                        if options.sequence_tag and options.sequence_tag in clustered_seq:
+                            has_second_sequences = True
+                            if clustered_seq not in all_sequences_seen:
+                                all_sequences.append(clustered_seq)
+                                all_sequences_seen.add(clustered_seq)
+                        else:
+                            source_cluster = sequence_to_first_cluster.get(clustered_seq)
+                            if source_cluster is None:
+                                if clustered_seq not in all_sequences_seen:
+                                    all_sequences.append(clustered_seq)
+                                    all_sequences_seen.add(clustered_seq)
+                            else:
+                                for source_seq in pangenome_clusters_First_sequences_sorted[source_cluster]:
+                                    if source_seq not in all_sequences_seen:
+                                        all_sequences.append(source_seq)
+                                        all_sequences_seen.add(source_seq)
+            group_name = f"combined_group_{cluster}" if has_second_sequences else f"group_{cluster}"
+            for seq in all_sequences:
                 outfile.write(f"{seq}\t{group_name}\n")
+        if combined_pangenome_clusters_Second_sequences_sorted:
+            for cluster, sequences in combined_pangenome_clusters_Second_sequences_sorted.items():
+                if cluster in merged_second_cluster_ids:
+                    continue
+                for seq in sequences:
+                    outfile.write(f"{seq}\tSecond_group_{cluster}\n")
     print(f"Gene group table written to {out_file}")
 
 
@@ -174,16 +261,16 @@ def get_cores(options,genome_dict):
     ##Calculate core groups
     groups = OrderedDict()
     cores = OrderedDict()
-    prev_top = len(genome_dict)
-    first = True
     for group in options.species_groups.split(','):
-        calculated_floor = math.floor(int(group) / 100 * len(genome_dict))
-        if first == False:
-            groups[group] = (calculated_floor,prev_top)
+        group = group.strip()
+        if not group:
+            continue
+        group_percent = int(group)
+        if group_percent <= 0:
+            threshold = 0
         else:
-            groups[group] = (calculated_floor, prev_top)
-            first = False
-        prev_top = calculated_floor
+            threshold = math.ceil(group_percent / 100 * len(genome_dict))
+        groups[group] = threshold
         first_core_group = 'First_core_' + group
         cores[first_core_group] = []
         if options.reclustered != None:
@@ -198,50 +285,39 @@ def get_cores(options,genome_dict):
     return cores, groups
 
 
+def _core_group_for_count(count, groups):
+    count = int(count)
+    for group, threshold in groups.items():
+        if count >= threshold:
+            return group
+    return next(reversed(groups))
+
+
 def calc_First_only_core(cluster, First_num, groups, cores):
-    groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= int(First_num) <= fir):
-        res = idx
-    family_group = list(groups)[res]
+    family_group = _core_group_for_count(First_num, groups)
     cores['First_core_'+family_group].append(cluster)
 
 
 def calc_single_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count gene families extended with StORFs
-    groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= First_num+Second_num <= fir):
-        res = idx
-
-    family_group = list(groups)[res]
+    family_group = _core_group_for_count(int(First_num) + int(Second_num), groups)
     cores['extended_core_' + family_group].append(cluster)
 
 
 
 def calc_multi_First_extended_Second_only_core(cluster, First_num, groups, cores, Second_num): # Count seperately those gene families extended with StORF-Reporter but combined >1 PEP
-    groups_as_list = list(groups.values())
-    # Looping through the list to find the matching condition
-    for idx, (sec, fir) in enumerate(groups_as_list):
-        if sec <= First_num + Second_num <= fir:
-            res = idx
-            break
-    family_group = list(groups)[res]
+    family_group = _core_group_for_count(int(First_num) + int(Second_num), groups)
     cores['combined_core_' + family_group].append(cluster)
 
 
 
 def calc_Second_only_core(cluster, Second_num, groups, cores):
-    groups_as_list = list(groups.values())
-    for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= Second_num <= fir):
-        res = idx
-    family_group = list(groups)[res]
+    family_group = _core_group_for_count(Second_num, groups)
     cores['Second_core_' + family_group].append(cluster)
 
 
 def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count the true storf onlies
     try:
-        groups_as_list = list(groups.values())
-        for idx in (idx for idx, (sec, fir) in enumerate(groups_as_list) if sec <= Second_num <= fir):
-            res = idx
-        family_group = list(groups)[res]
+        family_group = _core_group_for_count(Second_num, groups)
         cores['only_Second_core_' + family_group].append(cluster)
     except UnboundLocalError:
         sys.exit("Error in calc_only_Second_only_core")
@@ -249,6 +325,8 @@ def calc_only_Second_only_core(cluster, Second_num, groups, cores): # only count
 
 
 def cluster(options):
+
+    return run_pangenome_workflow(options, 'Species')
 
     print("Loading cluster file...")
     if options.cluster_format == 'CD-HIT':
@@ -271,7 +349,7 @@ def cluster(options):
         print("Loading reclustered file...")
         if options.cluster_format == 'CD-HIT':
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences = combined_clustering_CDHIT(options, genome_dict, '|')
-        elif 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
+        elif 'BLAST' in options.cluster_format or 'MMseqs' in options.cluster_format or 'TSV' in options.cluster_format or 'CSV' in options.cluster_format:
             combined_pangenome_clusters_First_Second_clustered, not_Second_only_cluster_ids, combined_pangenome_clusters_Second, combined_pangenome_clusters_Second_sequences  = combined_clustering_Edge_List(options, '|')
         print(f"Loaded {len(combined_pangenome_clusters_Second):,} reclustered groups")
 
@@ -330,6 +408,7 @@ def cluster(options):
             if multi_copy_genomes <= allowed_multi:
                 filtered_keys.append(cluster)
         # Reorder dictionaries to only include filtered clusters (preserve ordering)
+        pangenome_clusters_First_sorted = reorder_dict_by_keys(pangenome_clusters_First_sorted, filtered_keys)
         pangenome_clusters_First_sequences_sorted = reorder_dict_by_keys(pangenome_clusters_First_sequences_sorted, filtered_keys)
         pangenome_clusters_Type_sorted = reorder_dict_by_keys(pangenome_clusters_Type_sorted, filtered_keys)
         print(f"Retained {len(filtered_keys):,} clusters after single-copy filtering")
@@ -419,10 +498,28 @@ def cluster(options):
             gene_presence_absence_output(options, genome_dict, pangenome_clusters_First_sequences_sorted)
 
     if getattr(options, 'gene_group_table', False):
-        write_gene_group_table(options, pangenome_clusters_First_sequences_sorted)
+        if options.reclustered != None:
+            write_gene_group_table(options, pangenome_clusters_First_sequences_sorted,
+                                   combined_pangenome_clusters_First_Second_clustered,
+                                   combined_pangenome_clusters_Second_sequences_sorted)
+        else:
+            write_gene_group_table(options, pangenome_clusters_First_sequences_sorted)
 
     if getattr(options, 'core_group_table', False):
         write_core_group_table(options, cores, pangenome_clusters_First_sequences_sorted)
+
+    if getattr(options, 'visualise', False):
+        visual_dir = write_pangenome_visualisations(
+            options,
+            genome_dict,
+            cores,
+            pangenome_clusters_First_sorted,
+            pangenome_clusters_First_sequences_sorted,
+            mode_label='Species',
+            taxa_label='genomes',
+        )
+        if visual_dir:
+            print(f"Pangenome visualisations written to {visual_dir}")
 
 
     ###Need to fix this below. If full/partial the ifs need to be different. If full we first need to output the gfs then align. if -write-groups not presented then it needs

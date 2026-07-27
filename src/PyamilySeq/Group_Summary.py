@@ -10,12 +10,13 @@ except (ModuleNotFoundError, ImportError, NameError, TypeError):
 
 def categorise_percentage(percent):
     categories = {
+        (0, 20): "0-20%",
         (20, 40): "20-40%",
         (40, 60): "40-60%",
         (60, 80): "60-80%",
         (80, 95): "80-95%",
         (95, 99): "95-99%",
-        (99, 100): "99-100%"
+        (99, 101): "99-100%"
     }
     for (low, high), label in categories.items():
         if low <= percent < high:
@@ -89,7 +90,7 @@ def summarise_clusters(options, clusters, output):
             )
 
         # Define order for multicopy statistics output
-        category_order = ["20-40%", "40-60%", "60-80%", "80-95%", "95-99%", "99-100%"]
+        category_order = ["0-20%", "20-40%", "40-60%", "60-80%", "80-95%", "95-99%", "99-100%"]
         for category in category_order:
             logger.info("Clusters with multicopy genes in %s range: %s", category, multicopy_groups[category])
 
@@ -125,6 +126,8 @@ def main():
     parser.add_argument("--log-dir", dest="log_dir", default=None, help="Directory for logfile (default: output_dir or input file dir).")
 
     options = parser.parse_args()
+    if options.genome_num <= 0:
+        parser.error('-genome_num must be a positive integer')
 
     # Setup logger once we know output paths/options
     # after we resolve output_path / options.output_dir:

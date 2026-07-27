@@ -32,7 +32,7 @@ def count_matching_files(input_dir: str, name_split: Optional[str], extensions):
 def count_files_present_in_combined(combined_file: str, name_split: Optional[str]) -> int:
     """
     Heuristic: count number of distinct input files (genomes) already present in the combined output.
-    Primary approach: parse headers and take the second '|' field (header.split('|')[1]) as genome/file id.
+    Primary approach: parse headers and take the first '|' field (header.split('|')[0]) as genome/file id.
     If that parsing fails, look for tokens containing name_split inside the header.
     """
     if not combined_file or not os.path.exists(combined_file):
@@ -44,11 +44,11 @@ def count_files_present_in_combined(combined_file: str, name_split: Optional[str
                 if not line.startswith('>'):
                     continue
                 header = line[1:].strip()
-                # 1) Prefer headers like ">id|genome|rest" -> take genome (second field)
+                # 1) Prefer PyamilySeq headers like ">genome|gene" -> take genome (first field)
                 if '|' in header:
                     parts = header.split('|')
-                    if len(parts) > 1 and parts[1]:
-                        seen.add(parts[1])
+                    if parts[0]:
+                        seen.add(parts[0])
                         continue
                 # 2) If name_split provided, look for a filename-like token that includes it
                 if name_split:
@@ -145,7 +145,7 @@ def main():
     # Determine name_split and extensions per mode and count matching input files as total work units
     if options.input_type == 'fasta':
         name_split = options.name_split_fasta
-        exts = ('.fasta', '.fa', '.fna')
+        exts = ('.fasta', '.fa', '.fna', '.fasta.gz', '.fa.gz', '.fna.gz')
     else:  # 'separate' or 'combined'
         name_split = options.name_split_gff
         exts = ('.gff', '.gff3', '.gff.gz', '.gff3.gz')
