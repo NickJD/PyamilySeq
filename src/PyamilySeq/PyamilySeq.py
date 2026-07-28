@@ -129,7 +129,7 @@ def main():
         subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out",
                                help="Skip creation of gene_presence_absence.csv.")
         subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
-                                 help="Memory allocation for clustering (MB) - CD-HIT parameter '-M'.")
+                                 help="Memory budget in MB. In Partial mode this controls chunked loading of large inputs; in Full mode it is passed to CD-HIT.")
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
                                  help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
         # Options for selecting single-copy families
@@ -417,27 +417,39 @@ def main():
 
     if options.group_mode == 'Species':
         try:
+            logger.info("Dispatching species clustering")
             species_cluster(clustering_options)
             logger.info("Invoked species clustering.")
         except FileNotFoundError as e:
             logger.error("File not found during species clustering: %s", e)
             logger.debug("Traceback:\n%s", traceback.format_exc())
             sys.exit(1)
-        except Exception as e:
-            logger.error("Unexpected error during species clustering: %s", e)
-            logger.debug("Traceback:\n%s", traceback.format_exc())
+        except MemoryError:
+            logger.exception(
+                "Out of memory during species clustering. Partial mode currently loads the full FASTA and "
+                "cluster structures into RAM, so extremely large inputs can exhaust available memory."
+            )
+            sys.exit(1)
+        except Exception:
+            logger.exception("Unexpected error during species clustering")
             sys.exit(1)
     elif options.group_mode == 'Genus':
         try:
+            logger.info("Dispatching genus clustering")
             genus_cluster(clustering_options)
             logger.info("Invoked genus clustering.")
         except FileNotFoundError as e:
             logger.error("File not found during genus clustering: %s", e)
             logger.debug("Traceback:\n%s", traceback.format_exc())
             sys.exit(1)
-        except Exception as e:
-            logger.error("Unexpected error during genus clustering: %s", e)
-            logger.debug("Traceback:\n%s", traceback.format_exc())
+        except MemoryError:
+            logger.exception(
+                "Out of memory during genus clustering. Partial mode currently loads the full FASTA and "
+                "cluster structures into RAM, so extremely large inputs can exhaust available memory."
+            )
+            sys.exit(1)
+        except Exception:
+            logger.exception("Unexpected error during genus clustering")
             sys.exit(1)
 
     # Save arguments to a text file

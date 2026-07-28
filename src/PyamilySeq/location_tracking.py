@@ -575,11 +575,14 @@ def parse_clusters(path, cluster_format='auto'):
     """
     fam = defaultdict(list)
     opener = gzip.open if str(path).lower().endswith('.gz') else open
+    first = None
     with opener(path, 'rt', newline='', encoding='utf-8') as fh:
-        lines = [line for line in fh if line.strip() and not line.startswith('#')]
-    if not lines:
+        for line in fh:
+            if line.strip() and not line.startswith('#'):
+                first = line
+                break
+    if first is None:
         return {}
-    first = lines[0]
     first_cells = next(csv.reader([first]))
     requested = (cluster_format or 'auto').lower().replace('_', '-')
     is_gpa = requested in {'gpa', 'gene-presence-absence', 'roary'} or (
@@ -590,10 +593,10 @@ def parse_clusters(path, cluster_format='auto'):
     )
     if requested in {'cd-hit', 'cdhit'} or (requested == 'auto' and first.startswith('>Cluster')):
         try:
-            from .families import parse_cdhit
+            from .families import iter_cdhit_clusters
         except ImportError:
-            from families import parse_cdhit
-        return {f"Cluster_{cluster.label}": list(cluster.members) for cluster in parse_cdhit(path)}
+            from families import iter_cdhit_clusters
+        return {f"Cluster_{cluster.label}": list(cluster.members) for cluster in iter_cdhit_clusters(path)}
 
     if is_gpa:
         # Parse as Roary / gene_presence_absence.csv
@@ -649,46 +652,53 @@ def parse_clusters(path, cluster_format='auto'):
 
     if requested in {'mmseqs', 'mmseqs2'}:
         try:
-            from .families import parse_mmseqs
+            from .families import iter_mmseqs_clusters
         except ImportError:
-            from families import parse_mmseqs
-        return {cluster.label: list(cluster.members) for cluster in parse_mmseqs(path)}
+            from families import iter_mmseqs_clusters
+        return {cluster.label: list(cluster.members) for cluster in iter_mmseqs_clusters(path)}
 
     delimiter = ',' if requested in {'csv', 'family-csv', 'gene-table-csv'} else '\t'
     if requested == 'auto':
         delimiter = '\t' if '\t' in first else ','
-    rows = list(csv.reader(lines, delimiter=delimiter))
-    header = [cell.strip().lower() for cell in rows[0]]
-    reverse = requested in {'gene-table', 'gene-table-csv'}
-    skip_header = False
-    if len(header) >= 2:
-        if header[0] in {'sequence_id', 'sequence', 'gene_id', 'member_id'} and header[1] in {
-            'family_id', 'family', 'group', 'group_id'
-        }:
-            reverse = True
-            skip_header = True
-        elif header[0] in {'family_id', 'family', 'group', 'group_id'} and header[1] in {
-            'sequence_id', 'sequence', 'gene_id', 'member_id', 'members'
-        }:
-            skip_header = True
-
-    for row_index, row in enumerate(rows):
-        if row_index == 0 and skip_header:
-            continue
-        if len(row) < 2:
-            # Whitespace fallback is only safe when CSV/TSV parsing yielded one field.
-            row = row[0].split(None, 1) if row else []
-        if len(row) < 2:
-            continue
-        left, right = row[0].strip(), row[1].strip()
-        if reverse:
-            family, members = right, [left]
-        else:
-            family, members = left, [member for member in re_split_members(right) if member]
-        for member in members:
-            if member not in fam[family]:
-                fam[family].append(member)
-    return dict(fam)
+    with opener(path, 'rt', newline='', encoding='utf-8') as fh:
+        rows = csv.reader(fh, delimiter=delimiter)
+        header_row = None
+        for row in rows:
+            if row and not row[0].startswith('#'):
+                header_row = row
+                break
+        if header_row is None:
+            return {}
+        header = [cell.strip().lower() for cell in header_row]
+        reverse = requested in {'gene-table', 'gene-table-csv'}
+        skip_header = False
+        if len(header) >= 2:
+            if header[0] in {'sequence_id', 'sequence', 'gene_id', 'member_id'} and header[1] in {
+                'family_id', 'family', 'group', 'group_id'
+            }:
+                reverse = True
+                skip_header = True
+            elif header[0] in {'family_id', 'family', 'group', 'group_id'} and header[1] in {
+                'sequence_id', 'sequence', 'gene_id', 'member_id', 'members'
+            }:
+                skip_header = True
+        for row_index, row in enumerate(rows):
+            if row_index == 0 and skip_header:
+                continue
+            if len(row) < 2:
+                # Whitespace fallback is only safe when CSV/TSV parsing yielded one field.
+                row = row[0].split(None, 1) if row else []
+            if len(row) < 2:
+                continue
+            left, right = row[0].strip(), row[1].strip()
+            if reverse:
+                family, members = right, [left]
+            else:
+                family, members = left, [member for member in re_split_members(right) if member]
+            for member in members:
+                if member not in fam[family]:
+                    fam[family].append(member)
+        return dict(fam)
 
 
 def re_split_members(s):

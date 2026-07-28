@@ -7,9 +7,25 @@ from collections import defaultdict
 from collections import Counter
 
 try:
-    from .families import FamilyInputError, parse_blast, parse_cdhit, parse_mmseqs
+    from .families import (
+        FamilyInputError,
+        iter_blast_clusters,
+        iter_cdhit_clusters,
+        iter_mmseqs_clusters,
+        parse_blast,
+        parse_cdhit,
+        parse_mmseqs,
+    )
 except ImportError:
-    from families import FamilyInputError, parse_blast, parse_cdhit, parse_mmseqs
+    from families import (
+        FamilyInputError,
+        iter_blast_clusters,
+        iter_cdhit_clusters,
+        iter_mmseqs_clusters,
+        parse_blast,
+        parse_cdhit,
+        parse_mmseqs,
+    )
 
 
 def _open_text(path):
@@ -126,7 +142,7 @@ def _legacy_cluster_result(parsed_clusters, options, splitter):
     return taxa_dict, cluster_taxa, member_taxa, cluster_sequences, reps
 
 def cluster_CDHIT(options, splitter):
-    return _legacy_cluster_result(parse_cdhit(options.clusters), options, splitter)
+    return _legacy_cluster_result(iter_cdhit_clusters(options.clusters), options, splitter)
 
     First_in = open(options.clusters, 'r')
     # Read file contents so we can validate format before parsing.
@@ -199,7 +215,7 @@ def cluster_CDHIT(options, splitter):
     return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
 def cluster_BLAST(options, splitter):
-    return _legacy_cluster_result(parse_blast(options.clusters, options=options), options, splitter)
+    return _legacy_cluster_result(iter_blast_clusters(options.clusters, options=options), options, splitter)
 
     separator = '\t'
     pangenome_clusters_First = OrderedDict()
@@ -279,7 +295,7 @@ def cluster_BLAST(options, splitter):
     return taxa_dict, pangenome_clusters_First, pangenome_clusters_First_genomes, pangenome_clusters_First_sequences, reps
 
 def cluster_MMseqs(options,splitter):
-    return _legacy_cluster_result(parse_mmseqs(options.clusters), options, splitter)
+    return _legacy_cluster_result(iter_mmseqs_clusters(options.clusters), options, splitter)
 
     separator = '\t'
     pangenome_clusters_First = OrderedDict()
@@ -548,7 +564,7 @@ def _legacy_combined_result(parsed_clusters, options, splitter, taxa_dict=None):
 
 #@profile
 def combined_clustering_CDHIT(options, taxa_dict, splitter):
-    return _legacy_combined_result(parse_cdhit(options.reclustered), options, splitter, taxa_dict)
+    return _legacy_combined_result(iter_cdhit_clusters(options.reclustered), options, splitter, taxa_dict)
 
     Second_in = open(options.reclustered, 'r')
     combined_pangenome_clusters_First = OrderedDict()
@@ -670,11 +686,11 @@ def combined_clustering_CDHIT(options, taxa_dict, splitter):
 def combined_clustering_Edge_List(options, splitter):
     cluster_format = getattr(options, 'cluster_format', 'MMseqs')
     if cluster_format == 'CSV':
-        parsed = parse_mmseqs(options.reclustered, delimiter=',')
+        parsed = iter_mmseqs_clusters(options.reclustered, delimiter=',')
     elif 'BLAST' in cluster_format:
-        parsed = parse_blast(options.reclustered, options=options)
+        parsed = iter_blast_clusters(options.reclustered, options=options)
     else:
-        parsed = parse_mmseqs(options.reclustered)
+        parsed = iter_mmseqs_clusters(options.reclustered)
     return _legacy_combined_result(parsed, options, splitter)
 
     if options.cluster_format == 'CSV':

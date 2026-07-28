@@ -354,8 +354,7 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
             paired_files_found = True
             with _open_text(gff_file, 'rt') as file:
                 seen_seq_ids = collections.defaultdict(int)
-                lines = file.readlines()
-                for line in lines:
+                for line in file:
                     line_data = line.split('\t')
                     if len(line_data) == 9:
                         if feature_matches_gene_ident(line_data[2], gene_ident):
@@ -371,10 +370,10 @@ def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident,
                             else:
                                 seen_seq_ids[original_seq_id] = 1
                             gff_features.append((contig, start, end, strand, feature,  seq_id))
-            fasta_dict = collections.defaultdict(str)
+            fasta_dict = collections.defaultdict(lambda: ['', ''])
             with _open_text(corresponding_fasta_file, 'rt') as file:
-                lines = file.readlines()
-                for line in lines:
+                current_contig = None
+                for line in file:
                     if line.startswith('>'):
                         current_contig = line[1:].split()[0]
                         fasta_dict[current_contig] = ['', '']
@@ -443,13 +442,12 @@ def read_combined_files(input_dir, name_split, gene_ident, combined_out, transla
             sys.exit("Error: No GFF files found - check input directory and -name_split_gff parameter.")
         for gff_file in gff_files:
             genome_name = os.path.basename(gff_file).split(name_split)[0]
-            fasta_dict = collections.defaultdict(str)
+            fasta_dict = collections.defaultdict(lambda: ['', ''])
             gff_features = []
             with _open_text(gff_file, 'rt') as file:
                 seen_seq_ids = collections.defaultdict(int)
-                lines = file.readlines()
                 fasta_section = False
-                for line in lines:
+                for line in file:
                     if line.startswith('##FASTA'):
                         fasta_section = True
                         continue
@@ -536,8 +534,7 @@ def read_fasta_files(input_dir, name_split_fasta, combined_out, translate, run_a
             genome_name = os.path.basename(fasta_file).split(name_split_fasta)[0]
             fasta_dict = collections.defaultdict(str)
             with _open_text(fasta_file, 'rt') as file:
-                lines = file.readlines()
-                for line in lines:
+                for line in file:
                     if line.startswith('>'):
                         current_seq = line[1:].split()[0]
                         fasta_dict[current_seq] = ''

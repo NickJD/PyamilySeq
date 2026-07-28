@@ -7,6 +7,7 @@ import json
 import math
 import os
 import subprocess
+import logging
 from collections import Counter, OrderedDict
 
 from .families import FamilyInputError, build_family_ledger, read_fasta_records
@@ -415,6 +416,8 @@ def _write_run_manifest(path, options, ledger, selected_ids, mode):
 
 
 def run_pangenome_workflow(options, mode):
+    logger = logging.getLogger("PyamilySeq.PyamilySeq")
+    logger.info("Starting %s workflow", mode)
     ledger = build_family_ledger(
         fasta_path=options.fasta,
         cluster_path=options.clusters,
@@ -425,9 +428,12 @@ def run_pangenome_workflow(options, mode):
         taxon_map=getattr(options, "taxon_map", None),
         sequence_delimiter=getattr(options, "sequence_delimiter", "|") or "|",
         options=options,
+        logger=logger,
     )
+    logger.info("Family ledger ready: %s sequences, %s final families", len(ledger.sequences), len(ledger.families))
     group_text = options.species_groups if mode == "Species" else options.core_groups
     categories, _ = classify_families(ledger, mode, group_text)
+    logger.info("Classified families into %s categories", len(categories))
 
     all_family_ids = list(ledger.families)
     if getattr(options, "single_copy_only", False) or float(
@@ -440,6 +446,7 @@ def run_pangenome_workflow(options, mode):
 
     output_dir = os.path.abspath(options.output_dir)
     os.makedirs(output_dir, exist_ok=True)
+    logger.info("Writing assignment and summary outputs to %s", output_dir)
     ledger.write_assignments(os.path.join(output_dir, "gene_family_assignments.tsv"))
     _write_family_summary(os.path.join(output_dir, "family_summary.tsv"), ledger, selected_ids)
     _write_statistics(
@@ -453,19 +460,25 @@ def run_pangenome_workflow(options, mode):
         os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode,
     )
     if getattr(options, "gene_presence_absence_out", True):
+        logger.info("Writing gene_presence_absence.csv")
         _write_gpa(os.path.join(output_dir, "gene_presence_absence.csv"), ledger, selected_ids, mode)
     if getattr(options, "gene_group_table", False):
+        logger.info("Writing gene_group_table.tsv")
         _write_gene_group_table(os.path.join(output_dir, "gene_group_table.tsv"), ledger, selected_ids)
     if getattr(options, "core_group_table", False):
+        logger.info("Writing core_group_table.tsv")
         _write_core_group_table(os.path.join(output_dir, "core_group_table.tsv"), ledger, selected_ids)
+    logger.info("Writing pan_genome_reference.fa")
     _write_reference(os.path.join(output_dir, "pan_genome_reference.fa"), ledger, selected_ids)
 
     requested_ids = _requested_family_ids(options, ledger, selected_ids)
     if getattr(options, "write_groups", None) or getattr(options, "write_individual_groups", False):
         _write_family_fastas(options, ledger, requested_ids)
     if getattr(options, "align_core", False):
+        logger.info("Writing core_gene_alignment.aln")
         _write_alignment(options, ledger, requested_ids)
     if getattr(options, "visualise", False):
+        logger.info("Writing visual outputs")
         write_ledger_visualisations(options, ledger, selected_ids, categories, mode)
 
     print(
@@ -474,4 +487,8 @@ def run_pangenome_workflow(options, mode):
     )
     if len(selected_ids) != len(ledger.families):
         print(f"Retained {len(selected_ids):,} families after single-copy filtering.")
+    try:
+        ledger.sequences.close()
+    except Exception:
+        logger.debug("Sequence store close failed", exc_info=True)
     return ledger

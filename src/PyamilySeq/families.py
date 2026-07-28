@@ -13,7 +13,10 @@ import gzip
 import hashlib
 import math
 import os
+import logging
 import re
+import sqlite3
+import tempfile
 from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass, field
 from typing import Iterable, Mapping
@@ -28,6 +31,19 @@ def open_text(path, mode="rt"):
     return opener(path, mode, encoding="utf-8")
 
 
+def _log_progress(logger, message: str, current: int | None = None, total: int | None = None):
+    if logger is None:
+        return
+    if current is None:
+        logger.info(message)
+        return
+    if total:
+        percent = (100.0 * current / total) if total else 0.0
+        logger.info("%s: %s (%0.1f%%)", message, f"{current:,}/{total:,}", percent)
+    else:
+        logger.info("%s: %s", message, f"{current:,}")
+
+
 def fasta_identifier(defline: str) -> str:
     """Return the canonical FASTA identifier (the first whitespace token)."""
 
@@ -37,17 +53,204 @@ def fasta_identifier(defline: str) -> str:
     return identifier
 
 
-def read_fasta_records(path: str) -> OrderedDict[str, str]:
-    """Read FASTA records and reject identifiers that cannot be represented safely."""
+class SequenceStore:
+    """Disk-backed FASTA store with bounded in-memory buffering.
+
+    The store keeps only a small chunk of sequence records in RAM at a time and
+    spills them into a local SQLite database. This makes very large FASTA files
+    manageable without forcing the whole file into memory.
+    """
+
+    def __init__(self, path: str | None = None, buffer_bytes: int = 32 * 1024 * 1024):
+        if path is None:
+            fd, temp_path = tempfile.mkstemp(prefix="pyamilyseq_sequences_", suffix=".sqlite3")
+            os.close(fd)
+            self.path = temp_path
+        else:
+            self.path = path
+        self.buffer_bytes = max(1024 * 1024, int(buffer_bytes))
+        self._conn = sqlite3.connect(self.path)
+        self._conn.execute("PRAGMA journal_mode=OFF")
+        self._conn.execute("PRAGMA synchronous=OFF")
+        self._conn.execute("PRAGMA temp_store=MEMORY")
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS sequences (sequence_id TEXT PRIMARY KEY, sequence TEXT NOT NULL, length INTEGER NOT NULL)"
+        )
+        self._buffer: list[tuple[str, str, int]] = []
+        self._buffer_size = 0
+        self._count = 0
+        self._closed = False
+
+    @classmethod
+    def from_fasta(
+        cls,
+        path: str,
+        *,
+        memory_limit_mb: int | float | None = None,
+        logger=None,
+        report_every: int = 100_000,
+    ) -> "SequenceStore":
+        if memory_limit_mb is None or float(memory_limit_mb) <= 0:
+            memory_limit_mb = 128
+        limit_bytes = int(float(memory_limit_mb) * 1024 * 1024)
+        buffer_bytes = max(8 * 1024 * 1024, min(limit_bytes // 10, 256 * 1024 * 1024))
+        _log_progress(
+            logger,
+            f"Sequence buffering budget set to {buffer_bytes // (1024 * 1024):,} MB from -M={memory_limit_mb}",
+        )
+        store = cls(buffer_bytes=buffer_bytes)
+        current = None
+        chunks: list[str] = []
+        count = 0
+        _log_progress(logger, f"Loading FASTA records from {path}")
+        with open_text(path) as handle:
+            for line_number, line in enumerate(handle, start=1):
+                if line.startswith(">"):
+                    if current is not None:
+                        store.add(current, "".join(chunks))
+                        count += 1
+                        if report_every and count % report_every == 0:
+                            _log_progress(logger, "  FASTA records loaded", count)
+                    current = fasta_identifier(line[1:])
+                    chunks = []
+                elif current is None:
+                    if line.strip():
+                        raise FamilyInputError(
+                            f"Sequence data before the first FASTA header at line {line_number} in {path}"
+                        )
+                else:
+                    chunks.append("".join(line.split()))
+        if current is not None:
+            store.add(current, "".join(chunks))
+            count += 1
+        store.flush()
+        if count == 0:
+            raise FamilyInputError(f"No FASTA records found in {path}")
+        _log_progress(logger, "Finished loading FASTA records", count)
+        return store
+
+    def add(self, sequence_id: str, sequence: str):
+        if self._closed:
+            raise FamilyInputError("Attempted to write to a closed SequenceStore")
+        self._buffer.append((sequence_id, sequence, len(sequence)))
+        self._buffer_size += len(sequence_id) + len(sequence)
+        self._count += 1
+        if self._buffer_size >= self.buffer_bytes:
+            self.flush()
+
+    def flush(self):
+        if not self._buffer:
+            return
+        try:
+            self._conn.executemany(
+                "INSERT INTO sequences(sequence_id, sequence, length) VALUES (?, ?, ?)",
+                self._buffer,
+            )
+        except sqlite3.IntegrityError as exc:
+            raise FamilyInputError("Duplicate FASTA identifier encountered while loading sequences") from exc
+        self._conn.commit()
+        self._buffer.clear()
+        self._buffer_size = 0
+
+    def close(self):
+        if self._closed:
+            return
+        try:
+            self.flush()
+        finally:
+            self._conn.close()
+            self._closed = True
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    def __len__(self):
+        row = self._conn.execute("SELECT COUNT(*) FROM sequences").fetchone()
+        return int(row[0]) if row else 0
+
+    def __contains__(self, sequence_id):
+        row = self._conn.execute(
+            "SELECT 1 FROM sequences WHERE sequence_id = ? LIMIT 1", (sequence_id,)
+        ).fetchone()
+        return row is not None
+
+    def __getitem__(self, sequence_id):
+        row = self._conn.execute(
+            "SELECT sequence FROM sequences WHERE sequence_id = ?", (sequence_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(sequence_id)
+        return row[0]
+
+    def get(self, sequence_id, default=None):
+        row = self._conn.execute(
+            "SELECT sequence FROM sequences WHERE sequence_id = ?", (sequence_id,)
+        ).fetchone()
+        return row[0] if row is not None else default
+
+    def sequence_length(self, sequence_id):
+        row = self._conn.execute(
+            "SELECT length FROM sequences WHERE sequence_id = ?", (sequence_id,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(sequence_id)
+        return int(row[0])
+
+    def keys(self):
+        for (sequence_id,) in self._conn.execute(
+            "SELECT sequence_id FROM sequences ORDER BY sequence_id"
+        ):
+            yield sequence_id
+
+    def items(self):
+        for sequence_id, sequence in self._conn.execute(
+            "SELECT sequence_id, sequence FROM sequences ORDER BY sequence_id"
+        ):
+            yield sequence_id, sequence
+
+    def values(self):
+        for _, sequence in self.items():
+            yield sequence
+
+    def __iter__(self):
+        return self.keys()
+
+
+def read_fasta_records(path: str, logger=None, report_every: int = 100_000) -> OrderedDict[str, str]:
+    """Read FASTA records into memory.
+
+    Use :class:`SequenceStore.from_fasta` when memory pressure matters.
+    """
+
+    store = SequenceStore.from_fasta(path, logger=logger, report_every=report_every)
+    try:
+        records = OrderedDict(store.items())
+    finally:
+        store.close()
+    if not records:
+        raise FamilyInputError(f"No FASTA records found in {path}")
+    empty = [identifier for identifier, sequence in records.items() if not sequence]
+    if empty:
+        sample = ", ".join(empty[:10])
+        raise FamilyInputError(f"FASTA contains {len(empty)} empty sequence(s): {sample}")
+    return records
 
     records: OrderedDict[str, str] = OrderedDict()
     current = None
     chunks: list[str] = []
+    count = 0
+    _log_progress(logger, f"Loading FASTA records from {path}")
     with open_text(path) as handle:
         for line_number, line in enumerate(handle, start=1):
             if line.startswith(">"):
                 if current is not None:
                     records[current] = "".join(chunks)
+                    count += 1
+                    if report_every and count % report_every == 0:
+                        _log_progress(logger, "  FASTA records loaded", count)
                 current = fasta_identifier(line[1:])
                 if current in records:
                     raise FamilyInputError(
@@ -65,12 +268,14 @@ def read_fasta_records(path: str) -> OrderedDict[str, str]:
         if current in records:
             raise FamilyInputError(f"Duplicate FASTA identifier {current!r} in {path}")
         records[current] = "".join(chunks)
+        count += 1
     if not records:
         raise FamilyInputError(f"No FASTA records found in {path}")
     empty = [identifier for identifier, sequence in records.items() if not sequence]
     if empty:
         sample = ", ".join(empty[:10])
         raise FamilyInputError(f"FASTA contains {len(empty)} empty sequence(s): {sample}")
+    _log_progress(logger, "Finished loading FASTA records", count)
     return records
 
 
@@ -181,8 +386,7 @@ def _deduplicate_members(members: Iterable[str]) -> tuple[str, ...]:
     return tuple(OrderedDict.fromkeys(member for member in members if member))
 
 
-def parse_cdhit(path: str) -> list[ParsedCluster]:
-    clusters: list[ParsedCluster] = []
+def iter_cdhit_clusters(path: str):
     label = None
     members: list[str] = []
     representative = None
@@ -197,7 +401,7 @@ def parse_cdhit(path: str) -> list[ParsedCluster]:
         rep = representative or min(unique)
         if rep not in unique:
             raise FamilyInputError(f"Representative {rep!r} is not in CD-HIT cluster {label!r}")
-        clusters.append(ParsedCluster(label, unique, rep))
+        return ParsedCluster(label, unique, rep)
 
     with open_text(path) as handle:
         for line_number, raw in enumerate(handle, start=1):
@@ -205,7 +409,9 @@ def parse_cdhit(path: str) -> list[ParsedCluster]:
             if not line:
                 continue
             if line.startswith(">"):
-                finish()
+                finished = finish()
+                if finished is not None:
+                    yield finished
                 match = re.match(r"^>Cluster\s+(.+?)\s*$", line, flags=re.IGNORECASE)
                 if not match:
                     raise FamilyInputError(
@@ -226,7 +432,13 @@ def parse_cdhit(path: str) -> list[ParsedCluster]:
                 if representative is not None and representative != member:
                     raise FamilyInputError(f"CD-HIT cluster {label!r} has multiple representatives")
                 representative = member
-    finish()
+    finished = finish()
+    if finished is not None:
+        yield finished
+
+
+def parse_cdhit(path: str) -> list[ParsedCluster]:
+    clusters = list(iter_cdhit_clusters(path))
     if not clusters:
         raise FamilyInputError(f"No CD-HIT clusters found in {path}")
     labels = [cluster.label for cluster in clusters]
@@ -249,19 +461,29 @@ def _edge_rows(path: str, delimiter="\t"):
             yield line_number, [cell.strip() for cell in row]
 
 
-def parse_mmseqs(path: str, delimiter="\t") -> list[ParsedCluster]:
-    grouped: OrderedDict[str, OrderedDict[str, None]] = OrderedDict()
+def iter_mmseqs_clusters(path: str, delimiter="\t", logger=None, report_every: int = 100_000):
+    grouped: OrderedDict[str, list[str]] = OrderedDict()
+    row_count = 0
+    _log_progress(logger, f"Parsing MMseqs clusters from {path}")
     for _, row in _edge_rows(path, delimiter=delimiter):
         representative, member = row[:2]
-        grouped.setdefault(representative, OrderedDict())
-        grouped[representative][representative] = None
-        grouped[representative][member] = None
+        members = grouped.setdefault(representative, [])
+        if representative not in members:
+            members.append(representative)
+        if member not in members:
+            members.append(member)
+        row_count += 1
+        if report_every and row_count % report_every == 0:
+            _log_progress(logger, "  MMseqs rows parsed", row_count)
     if not grouped:
         raise FamilyInputError(f"No MMseqs clusters found in {path}")
-    return [
-        ParsedCluster(rep, tuple(members), rep)
-        for rep, members in grouped.items()
-    ]
+    _log_progress(logger, "Finished parsing MMseqs clusters", row_count)
+    for rep, members in grouped.items():
+        yield ParsedCluster(rep, tuple(members), rep)
+
+
+def parse_mmseqs(path: str, delimiter="\t", logger=None, report_every: int = 100_000) -> list[ParsedCluster]:
+    return list(iter_mmseqs_clusters(path, delimiter=delimiter, logger=logger, report_every=report_every))
 
 
 def _float_cell(row, index, name, line_number, path):
@@ -273,7 +495,7 @@ def _float_cell(row, index, name, line_number, path):
         ) from None
 
 
-def parse_blast(path: str, options=None, delimiter="\t") -> list[ParsedCluster]:
+def iter_blast_clusters(path: str, options=None, delimiter="\t", logger=None, report_every: int = 100_000):
     """Parse BLAST edges with optional filtering and reciprocal-best-hit linkage.
 
     Two-column files are treated as an explicitly filtered undirected edge list.
@@ -293,50 +515,48 @@ def parse_blast(path: str, options=None, delimiter="\t") -> list[ParsedCluster]:
     graph_mode = getattr(options, "blast_graph_mode", "reciprocal-best")
 
     nodes: set[str] = set()
-    hits: list[tuple[str, str, float, int]] = []
     scored = False
+    best_score: dict[str, float] = {}
+    best_subjects: dict[str, set[str]] = defaultdict(set)
+    row_count = 0
     for line_number, row in _edge_rows(path, delimiter=delimiter):
         query, subject = row[:2]
         nodes.update((query, subject))
-        if len(row) == 2:
-            hits.append((query, subject, 1.0, line_number))
-            continue
-        scored = True
-        if "pident" in column_index:
-            identity = _float_cell(row, column_index["pident"], "pident", line_number, path)
-            if identity < min_identity:
-                continue
-        if "evalue" in column_index:
-            evalue = _float_cell(row, column_index["evalue"], "evalue", line_number, path)
-            if evalue > max_evalue:
-                continue
-        alignment_length = None
-        if "length" in column_index:
-            alignment_length = _float_cell(row, column_index["length"], "length", line_number, path)
-        if min_query_coverage or min_subject_coverage:
-            if alignment_length is None or "qlen" not in column_index or "slen" not in column_index:
-                raise FamilyInputError(
-                    "BLAST coverage filtering requires length, qlen, and slen in --blast-columns"
-                )
-            query_length = _float_cell(row, column_index["qlen"], "qlen", line_number, path)
-            subject_length = _float_cell(row, column_index["slen"], "slen", line_number, path)
-            query_coverage = 100.0 * alignment_length / query_length if query_length else 0.0
-            subject_coverage = 100.0 * alignment_length / subject_length if subject_length else 0.0
-            if query_coverage < min_query_coverage or subject_coverage < min_subject_coverage:
-                continue
-        if "bitscore" in column_index:
-            score = _float_cell(row, column_index["bitscore"], "bitscore", line_number, path)
-        elif "evalue" in column_index:
-            score = -math.log10(max(evalue, 1e-300))
+        if len(row) > 2:
+            scored = True
+            if "pident" in column_index:
+                identity = _float_cell(row, column_index["pident"], "pident", line_number, path)
+                if identity < min_identity:
+                    continue
+            if "evalue" in column_index:
+                evalue = _float_cell(row, column_index["evalue"], "evalue", line_number, path)
+                if evalue > max_evalue:
+                    continue
+            alignment_length = None
+            if "length" in column_index:
+                alignment_length = _float_cell(row, column_index["length"], "length", line_number, path)
+            if min_query_coverage or min_subject_coverage:
+                if alignment_length is None or "qlen" not in column_index or "slen" not in column_index:
+                    raise FamilyInputError(
+                        "BLAST coverage filtering requires length, qlen, and slen in --blast-columns"
+                    )
+                query_length = _float_cell(row, column_index["qlen"], "qlen", line_number, path)
+                subject_length = _float_cell(row, column_index["slen"], "slen", line_number, path)
+                query_coverage = 100.0 * alignment_length / query_length if query_length else 0.0
+                subject_coverage = 100.0 * alignment_length / subject_length if subject_length else 0.0
+                if query_coverage < min_query_coverage or subject_coverage < min_subject_coverage:
+                    continue
+            if "bitscore" in column_index:
+                score = _float_cell(row, column_index["bitscore"], "bitscore", line_number, path)
+            elif "evalue" in column_index:
+                score = -math.log10(max(evalue, 1e-300))
+            else:
+                score = 1.0
         else:
             score = 1.0
-        hits.append((query, subject, score, line_number))
 
-    adjacency: dict[str, set[str]] = {node: set() for node in nodes}
-    if scored and graph_mode == "reciprocal-best":
-        best_score: dict[str, float] = {}
-        best_subjects: dict[str, set[str]] = defaultdict(set)
-        for query, subject, score, _ in hits:
+        row_count += 1
+        if scored and graph_mode == "reciprocal-best":
             if query == subject:
                 continue
             if query not in best_score or score > best_score[query]:
@@ -344,25 +564,32 @@ def parse_blast(path: str, options=None, delimiter="\t") -> list[ParsedCluster]:
                 best_subjects[query] = {subject}
             elif score == best_score[query]:
                 best_subjects[query].add(subject)
-        for query, subject, _, _ in hits:
-            if query == subject:
-                continue
-            if subject in best_subjects.get(query, ()) and query in best_subjects.get(subject, ()):
-                adjacency[query].add(subject)
-                adjacency[subject].add(query)
-    else:
-        for query, subject, _, _ in hits:
+        else:
             if query != subject:
-                adjacency[query].add(subject)
-                adjacency[subject].add(query)
+                best_subjects[query].add(subject)
+                best_subjects[subject].add(query)
+        if report_every and row_count % report_every == 0:
+            _log_progress(logger, "  BLAST rows parsed", row_count)
+
+    if not nodes:
+        raise FamilyInputError(f"No BLAST nodes found in {path}")
+    adjacency: dict[str, set[str]] = {node: set() for node in nodes}
+    if scored and graph_mode == "reciprocal-best":
+        for query, subjects in best_subjects.items():
+            for subject in subjects:
+                if query != subject and query in best_subjects.get(subject, ()) and subject in best_subjects.get(query, ()):
+                    adjacency[query].add(subject)
+                    adjacency[subject].add(query)
+    else:
+        for query, subjects in best_subjects.items():
+            for subject in subjects:
+                if query != subject:
+                    adjacency[query].add(subject)
+                    adjacency[subject].add(query)
 
     clusters: list[ParsedCluster] = []
     visited: set[str] = set()
-    weighted_degree = Counter()
-    for query, subject, score, _ in hits:
-        if subject in adjacency.get(query, ()):
-            weighted_degree[query] += score
-            weighted_degree[subject] += score
+    weighted_degree = Counter({node: len(neighbors) for node, neighbors in adjacency.items()})
     for seed in sorted(nodes):
         if seed in visited:
             continue
@@ -378,24 +605,45 @@ def parse_blast(path: str, options=None, delimiter="\t") -> list[ParsedCluster]:
         component.sort()
         representative = min(component, key=lambda node: (-weighted_degree[node], node))
         clusters.append(ParsedCluster(str(len(clusters)), tuple(component), representative))
-    if not clusters:
-        raise FamilyInputError(f"No BLAST nodes found in {path}")
-    return clusters
+    _log_progress(logger, f"Finished parsing BLAST clusters: {len(clusters):,} components from {row_count:,} rows")
+    for cluster in clusters:
+        yield cluster
 
 
-def parse_cluster_file(path: str, cluster_format: str, options=None) -> list[ParsedCluster]:
+def parse_blast(path: str, options=None, delimiter="\t", logger=None, report_every: int = 100_000) -> list[ParsedCluster]:
+    return list(
+        iter_blast_clusters(
+            path,
+            options=options,
+            delimiter=delimiter,
+            logger=logger,
+            report_every=report_every,
+        )
+    )
+
+
+def iter_cluster_file(path: str, cluster_format: str, options=None, logger=None):
     normalised = cluster_format.strip().upper().replace("_", "-")
     if normalised in {"CD-HIT", "CDHIT", "CD-HIT-EST"}:
-        return parse_cdhit(path)
+        yield from iter_cdhit_clusters(path)
+        return
     if normalised.startswith("MMSEQ"):
-        return parse_mmseqs(path)
+        yield from iter_mmseqs_clusters(path, logger=logger)
+        return
     if normalised in {"TSV", "EDGE", "EDGE-LIST"}:
-        return parse_mmseqs(path)
+        yield from iter_mmseqs_clusters(path, logger=logger)
+        return
     if normalised == "CSV":
-        return parse_mmseqs(path, delimiter=",")
+        yield from iter_mmseqs_clusters(path, delimiter=",", logger=logger)
+        return
     if normalised.startswith("BLAST"):
-        return parse_blast(path, options=options)
+        yield from iter_blast_clusters(path, options=options, logger=logger)
+        return
     raise FamilyInputError(f"Unsupported clustering format: {cluster_format}")
+
+
+def parse_cluster_file(path: str, cluster_format: str, options=None, logger=None) -> list[ParsedCluster]:
+    return list(iter_cluster_file(path, cluster_format, options=options, logger=logger))
 
 
 def _check_disjoint_clusters(clusters: Iterable[ParsedCluster], source: str):
@@ -433,7 +681,7 @@ class _DisjointSet:
 
 @dataclass
 class FamilyLedger:
-    sequences: OrderedDict[str, str]
+    sequences: SequenceStore
     families: OrderedDict[str, Family]
     resolver: TaxonResolver
     source_families: OrderedDict[str, ParsedCluster] = field(default_factory=OrderedDict)
@@ -448,16 +696,24 @@ class FamilyLedger:
                         f"Sequence {member!r} is assigned to final families {previous!r} and {family_id!r}"
                     )
                 self.assignment[member] = family_id
-        fasta_ids = set(self.sequences)
-        assigned_ids = set(self.assignment)
-        missing = sorted(fasta_ids - assigned_ids)
-        unknown = sorted(assigned_ids - fasta_ids)
+        missing = []
+        for sequence_id in self.sequences:
+            if sequence_id not in self.assignment:
+                missing.append(sequence_id)
+                if len(missing) >= 10:
+                    break
+        unknown = []
+        for sequence_id in self.assignment:
+            if sequence_id not in self.sequences:
+                unknown.append(sequence_id)
+                if len(unknown) >= 10:
+                    break
         if missing or unknown:
             details = []
             if missing:
-                details.append(f"{len(missing)} unassigned FASTA IDs ({', '.join(missing[:10])})")
+                details.append(f"unassigned FASTA IDs ({', '.join(missing)})")
             if unknown:
-                details.append(f"{len(unknown)} cluster IDs absent from FASTA ({', '.join(unknown[:10])})")
+                details.append(f"cluster IDs absent from FASTA ({', '.join(unknown)})")
             raise FamilyInputError("Final family assignment is not exact: " + "; ".join(details))
 
     @property
@@ -524,51 +780,62 @@ def build_family_ledger(
     taxon_map=None,
     sequence_delimiter="|",
     options=None,
+    logger=None,
 ) -> FamilyLedger:
-    sequences = read_fasta_records(fasta_path)
+    logger = logger or logging.getLogger("PyamilySeq.PyamilySeq")
+    _log_progress(logger, "Building canonical family ledger")
+    sequences = SequenceStore.from_fasta(
+        fasta_path,
+        memory_limit_mb=getattr(options, "mem", None),
+        logger=logger,
+    )
     resolver = TaxonResolver(mode=mode, mapping_path=taxon_map, sequence_delimiter=sequence_delimiter)
-    parsed = parse_cluster_file(cluster_path, cluster_format, options=options)
-    _check_disjoint_clusters(parsed, "initial")
-
-    fasta_ids = set(sequences)
-    clustered_ids = {member for cluster in parsed for member in cluster.members}
-    unknown = sorted(clustered_ids - fasta_ids)
-    if unknown:
-        raise FamilyInputError(
-            f"Initial clusters contain {len(unknown)} identifiers absent from FASTA: {', '.join(unknown[:10])}"
-        )
-
-    initial_clusters = list(parsed)
-    for sequence_id in sorted(fasta_ids - clustered_ids):
-        initial_clusters.append(ParsedCluster(f"singleton:{sequence_id}", (sequence_id,), sequence_id))
-
+    _log_progress(logger, f"Parsing initial {cluster_format} clusters from {cluster_path}")
     source_families: OrderedDict[str, ParsedCluster] = OrderedDict()
     sequence_source: dict[str, str] = {}
     source_labels: dict[str, str] = {}
     source_is_first: dict[str, bool] = {}
-    for parsed_cluster in initial_clusters:
+    parsed_count = 0
+    for parsed_cluster in iter_cluster_file(cluster_path, cluster_format, options=options, logger=logger):
+        parsed_count += 1
         source_id = _stable_id("source", parsed_cluster.members)
-        if source_id in source_families and source_families[source_id].members != parsed_cluster.members:
-            raise FamilyInputError(f"Internal source-family identifier collision for {source_id}")
         source_families[source_id] = parsed_cluster
         source_labels[source_id] = parsed_cluster.label
-        source_is_first[source_id] = not recluster_path or any(
-            member in clustered_ids for member in parsed_cluster.members
-        )
+        source_is_first[source_id] = True
         for member in parsed_cluster.members:
+            if member not in sequences:
+                raise FamilyInputError(
+                    f"Initial clusters contain identifier absent from FASTA: {member}"
+                )
             if member in sequence_source:
                 raise FamilyInputError(f"Sequence {member!r} occurs in more than one initial family")
             sequence_source[member] = source_id
+    _log_progress(logger, f"Parsed {parsed_count:,} initial clusters")
+
+    singleton_count = sum(1 for sequence_id in sequences if sequence_id not in sequence_source)
+    if singleton_count:
+        _log_progress(logger, f"Backfilling {singleton_count:,} missing FASTA singletons")
+    for sequence_id in sequences:
+        if sequence_id in sequence_source:
+            continue
+        source_id = _stable_id("source", (sequence_id,))
+        parsed_cluster = ParsedCluster(f"singleton:{sequence_id}", (sequence_id,), sequence_id)
+        source_families[source_id] = parsed_cluster
+        source_labels[source_id] = parsed_cluster.label
+        source_is_first[source_id] = not recluster_path
+        sequence_source[sequence_id] = source_id
 
     dsu = _DisjointSet(source_families)
     recluster_by_root: dict[str, list[ParsedCluster]] = defaultdict(list)
     parsed_reclusters: list[ParsedCluster] = []
     if recluster_path:
-        parsed_reclusters = parse_cluster_file(recluster_path, cluster_format, options=options)
+        _log_progress(logger, f"Parsing reclustered families from {recluster_path}")
+        parsed_reclusters = list(iter_cluster_file(recluster_path, cluster_format, options=options, logger=logger))
         # A sequence may legitimately occur as a representative on every MMseqs row,
         # but it must not belong to distinct parsed clusters after adapter grouping.
-        _check_disjoint_clusters(parsed_reclusters, "reclustered")
-        recluster_unknown = sorted({m for c in parsed_reclusters for m in c.members} - fasta_ids)
+        recluster_unknown = sorted(
+            {m for c in parsed_reclusters for m in c.members if m not in sequences}
+        )
         if recluster_unknown:
             raise FamilyInputError(
                 f"Reclustered data contain {len(recluster_unknown)} identifiers absent from FASTA: "
@@ -633,4 +900,5 @@ def build_family_ledger(
 
     built.sort(key=lambda family: family.family_id)
     families = OrderedDict((family.family_id, family) for family in built)
+    _log_progress(logger, f"Built {len(families):,} final families")
     return FamilyLedger(sequences, families, resolver, source_families)
