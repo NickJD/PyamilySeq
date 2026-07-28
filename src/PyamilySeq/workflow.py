@@ -10,9 +10,16 @@ import subprocess
 import logging
 from collections import Counter, OrderedDict
 
-from .families import FamilyInputError, build_family_ledger, read_fasta_records
-from .utils import detect_sequence_type, translate_frame, wrap_sequence
-from .visualisations import write_ledger_visualisations
+try:
+    from .families import FamilyInputError, build_family_ledger, read_fasta_records
+    from .utils import detect_sequence_type, translate_frame, wrap_sequence
+    from .visualisations import write_ledger_visualisations
+
+except (ModuleNotFoundError, ImportError, NameError, TypeError) as error:
+    from families import FamilyInputError, build_family_ledger, read_fasta_records
+    from utils import detect_sequence_type, translate_frame, wrap_sequence
+    from visualisations import write_ledger_visualisations
+
 
 
 GPA_METADATA_COLUMNS = [

@@ -348,6 +348,7 @@ def main():
                 self.write_groups = options.write_groups
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
+                self.mem = options.mem
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = combined_out_file
@@ -390,6 +391,7 @@ def main():
                 self.write_groups = options.write_groups
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
+                self.mem = options.mem
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = options.original_fasta
