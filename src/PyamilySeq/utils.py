@@ -283,7 +283,8 @@ def run_mafft_on_sequences(options, sequences, output_file):
     """Run mafft on the given sequences and write to output file."""
     emit_pending_startup_messages()
     # Create a temporary input file for mafft
-    with NamedTemporaryFile('w', delete=False) as temp_input_file:
+    temp_dir = getattr(options, "tmp_dir", None)
+    with NamedTemporaryFile('w', delete=False, dir=temp_dir) as temp_input_file:
         for header, sequence in sequences.items():
             temp_input_file.write(f">{header}\n{sequence}\n")
         temp_input_file_path = temp_input_file.name

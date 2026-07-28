@@ -130,6 +130,8 @@ def main():
                                help="Skip creation of gene_presence_absence.csv.")
         subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
                                  help="Memory budget in MB. In Partial mode this controls chunked loading of large inputs; in Full mode it is passed to CD-HIT.")
+        subparser.add_argument("--tmp-dir", dest="tmp_dir", default=None,
+                               help="Directory for temporary files such as chunked sequence stores and MAFFT scratch files.")
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
                                  help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
         # Options for selecting single-copy families
@@ -284,6 +286,9 @@ def main():
         options.output_dir = fix_path(options.output_dir)
     if getattr(options, 'taxon_map', None):
         options.taxon_map = fix_path(options.taxon_map)
+    if getattr(options, 'tmp_dir', None):
+        options.tmp_dir = fix_path(options.tmp_dir)
+        os.makedirs(options.tmp_dir, exist_ok=True)
 
     output_path = os.path.abspath(options.output_dir)
     combined_out_file = os.path.join(output_path, "combined_sequences_dna.fasta")
@@ -349,6 +354,7 @@ def main():
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.mem = options.mem
+                self.tmp_dir = options.tmp_dir
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = combined_out_file
@@ -392,6 +398,7 @@ def main():
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.mem = options.mem
+                self.tmp_dir = options.tmp_dir
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = options.original_fasta

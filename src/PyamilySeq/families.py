@@ -61,13 +61,15 @@ class SequenceStore:
     manageable without forcing the whole file into memory.
     """
 
-    def __init__(self, path: str | None = None, buffer_bytes: int = 32 * 1024 * 1024):
+    def __init__(self, path: str | None = None, buffer_bytes: int = 32 * 1024 * 1024, temp_dir: str | None = None):
         if path is None:
-            fd, temp_path = tempfile.mkstemp(prefix="pyamilyseq_sequences_", suffix=".sqlite3")
+            fd, temp_path = tempfile.mkstemp(prefix="pyamilyseq_sequences_", suffix=".sqlite3", dir=temp_dir)
             os.close(fd)
             self.path = temp_path
+            self._owns_path = True
         else:
             self.path = path
+            self._owns_path = False
         self.buffer_bytes = max(1024 * 1024, int(buffer_bytes))
         self._conn = sqlite3.connect(self.path)
         self._conn.execute("PRAGMA journal_mode=OFF")
@@ -87,6 +89,7 @@ class SequenceStore:
         path: str,
         *,
         memory_limit_mb: int | float | None = None,
+        temp_dir: str | None = None,
         logger=None,
         report_every: int = 100_000,
     ) -> "SequenceStore":
@@ -98,36 +101,45 @@ class SequenceStore:
             logger,
             f"Sequence buffering budget set to {buffer_bytes // (1024 * 1024):,} MB from -M={memory_limit_mb}",
         )
-        store = cls(buffer_bytes=buffer_bytes)
-        current = None
-        chunks: list[str] = []
-        count = 0
-        _log_progress(logger, f"Loading FASTA records from {path}")
-        with open_text(path) as handle:
-            for line_number, line in enumerate(handle, start=1):
-                if line.startswith(">"):
-                    if current is not None:
-                        store.add(current, "".join(chunks))
-                        count += 1
-                        if report_every and count % report_every == 0:
-                            _log_progress(logger, "  FASTA records loaded", count)
-                    current = fasta_identifier(line[1:])
-                    chunks = []
-                elif current is None:
-                    if line.strip():
-                        raise FamilyInputError(
-                            f"Sequence data before the first FASTA header at line {line_number} in {path}"
-                        )
-                else:
-                    chunks.append("".join(line.split()))
-        if current is not None:
-            store.add(current, "".join(chunks))
-            count += 1
-        store.flush()
-        if count == 0:
-            raise FamilyInputError(f"No FASTA records found in {path}")
-        _log_progress(logger, "Finished loading FASTA records", count)
-        return store
+        store = cls(buffer_bytes=buffer_bytes, temp_dir=temp_dir)
+        try:
+            current = None
+            chunks: list[str] = []
+            count = 0
+            _log_progress(logger, f"Loading FASTA records from {path}")
+            with open_text(path) as handle:
+                for line_number, line in enumerate(handle, start=1):
+                    if line.startswith(">"):
+                        if current is not None:
+                            store.add(current, "".join(chunks))
+                            count += 1
+                            if report_every and count % report_every == 0:
+                                _log_progress(logger, "  FASTA records loaded", count)
+                        current = fasta_identifier(line[1:])
+                        chunks = []
+                    elif current is None:
+                        if line.strip():
+                            raise FamilyInputError(
+                                f"Sequence data before the first FASTA header at line {line_number} in {path}"
+                            )
+                    else:
+                        chunks.append("".join(line.split()))
+            if current is not None:
+                store.add(current, "".join(chunks))
+                count += 1
+            store.flush()
+            if count == 0:
+                raise FamilyInputError(f"No FASTA records found in {path}")
+            _log_progress(logger, "Finished loading FASTA records", count)
+            return store
+        except Exception:
+            store.close()
+            if getattr(store, "_owns_path", False):
+                try:
+                    os.remove(store.path)
+                except FileNotFoundError:
+                    pass
+            raise
 
     def add(self, sequence_id: str, sequence: str):
         if self._closed:
@@ -160,6 +172,11 @@ class SequenceStore:
         finally:
             self._conn.close()
             self._closed = True
+            if getattr(self, "_owns_path", False):
+                try:
+                    os.remove(self.path)
+                except FileNotFoundError:
+                    pass
 
     def __del__(self):
         try:
@@ -787,6 +804,7 @@ def build_family_ledger(
     sequences = SequenceStore.from_fasta(
         fasta_path,
         memory_limit_mb=getattr(options, "mem", None),
+        temp_dir=getattr(options, "tmp_dir", None),
         logger=logger,
     )
     resolver = TaxonResolver(mode=mode, mapping_path=taxon_map, sequence_delimiter=sequence_delimiter)
