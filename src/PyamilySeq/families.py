@@ -89,17 +89,22 @@ class SequenceStore:
         path: str,
         *,
         memory_limit_mb: int | float | None = None,
+        buffer_cap_mb: int | float | None = None,
         temp_dir: str | None = None,
         logger=None,
         report_every: int = 100_000,
     ) -> "SequenceStore":
         if memory_limit_mb is None or float(memory_limit_mb) <= 0:
             memory_limit_mb = 128
+        if buffer_cap_mb is None or float(buffer_cap_mb) <= 0:
+            buffer_cap_mb = 256
         limit_bytes = int(float(memory_limit_mb) * 1024 * 1024)
-        buffer_bytes = max(8 * 1024 * 1024, min(limit_bytes // 10, 256 * 1024 * 1024))
+        cap_bytes = int(float(buffer_cap_mb) * 1024 * 1024)
+        buffer_bytes = max(8 * 1024 * 1024, min(limit_bytes // 10, cap_bytes))
         _log_progress(
             logger,
-            f"Sequence buffering budget set to {buffer_bytes // (1024 * 1024):,} MB from -M={memory_limit_mb}",
+            f"Sequence buffering budget set to {buffer_bytes // (1024 * 1024):,} MB from -M={memory_limit_mb} "
+            f"(cap {buffer_cap_mb} MB)",
         )
         store = cls(buffer_bytes=buffer_bytes, temp_dir=temp_dir)
         try:
@@ -804,6 +809,7 @@ def build_family_ledger(
     sequences = SequenceStore.from_fasta(
         fasta_path,
         memory_limit_mb=getattr(options, "mem", None),
+        buffer_cap_mb=getattr(options, "sequence_buffer_cap_mb", None),
         temp_dir=getattr(options, "tmp_dir", None),
         logger=logger,
     )

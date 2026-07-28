@@ -130,6 +130,8 @@ def main():
                                help="Skip creation of gene_presence_absence.csv.")
         subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
                                  help="Memory budget in MB. In Partial mode this controls chunked loading of large inputs; in Full mode it is passed to CD-HIT.")
+        subparser.add_argument("--sequence-buffer-cap-mb", type=int, default=256, dest="sequence_buffer_cap_mb",
+                               help="Maximum chunk size in MB for the FASTA-backed sequence store used during loading.")
         subparser.add_argument("--tmp-dir", dest="tmp_dir", default=None,
                                help="Directory for temporary files such as chunked sequence stores and MAFFT scratch files.")
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
@@ -286,6 +288,8 @@ def main():
         options.output_dir = fix_path(options.output_dir)
     if getattr(options, 'taxon_map', None):
         options.taxon_map = fix_path(options.taxon_map)
+    if getattr(options, 'sequence_buffer_cap_mb', None) is not None and options.sequence_buffer_cap_mb <= 0:
+        sys.exit("--sequence-buffer-cap-mb must be greater than 0")
     if getattr(options, 'tmp_dir', None):
         options.tmp_dir = fix_path(options.tmp_dir)
         os.makedirs(options.tmp_dir, exist_ok=True)
@@ -354,6 +358,7 @@ def main():
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.mem = options.mem
+                self.sequence_buffer_cap_mb = options.sequence_buffer_cap_mb
                 self.tmp_dir = options.tmp_dir
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
@@ -398,6 +403,7 @@ def main():
                 self.write_individual_groups = options.write_individual_groups
                 self.threads = options.threads
                 self.mem = options.mem
+                self.sequence_buffer_cap_mb = options.sequence_buffer_cap_mb
                 self.tmp_dir = options.tmp_dir
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
