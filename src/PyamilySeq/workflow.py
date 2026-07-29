@@ -401,7 +401,8 @@ def _write_run_manifest(path, options, ledger, selected_ids, mode):
         'analysis_mode': mode,
         'cluster_format': options.cluster_format,
         'cluster_file': os.path.abspath(options.clusters),
-        'fasta_file': os.path.abspath(options.fasta),
+        'fasta_file': os.path.abspath(options.fasta) if getattr(options, 'fasta', None) else None,
+        'sequence_db': os.path.abspath(options.sequence_db) if getattr(options, 'sequence_db', None) else None,
         'reclustered_file': (
             os.path.abspath(options.reclustered) if getattr(options, 'reclustered', None) else None
         ),
@@ -436,6 +437,7 @@ def run_pangenome_workflow(options, mode):
         sequence_delimiter=getattr(options, "sequence_delimiter", "|") or "|",
         options=options,
         logger=logger,
+        sequence_db_path=getattr(options, "sequence_db", None),
     )
     logger.info("Family ledger ready: %s sequences, %s final families", len(ledger.sequences), len(ledger.families))
     group_text = options.species_groups if mode == "Species" else options.core_groups

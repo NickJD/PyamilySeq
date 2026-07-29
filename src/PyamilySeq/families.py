@@ -82,6 +82,24 @@ class SequenceStore:
         self._buffer_size = 0
         self._count = 0
         self._closed = False
+        self._id_cache: set[str] | None = None
+
+    @classmethod
+    def from_existing_db(cls, path: str, logger=None) -> "SequenceStore":
+        """Reopen a SQLite database previously produced by :meth:`from_fasta`.
+
+        Used to resume after the (often very slow) FASTA-loading step has
+        already completed, without re-parsing the original FASTA file.
+        """
+        if not os.path.exists(path):
+            raise FamilyInputError(f"Sequence database not found: {path}")
+        store = cls(path=path)
+        count = len(store)
+        if count == 0:
+            store.close()
+            raise FamilyInputError(f"Sequence database at {path} contains no sequences")
+        _log_progress(logger, f"Reusing existing sequence database {path}", count)
+        return store
 
     @classmethod
     def from_fasta(
@@ -168,6 +186,7 @@ class SequenceStore:
         self._conn.commit()
         self._buffer.clear()
         self._buffer_size = 0
+        self._id_cache = None
 
     def close(self):
         if self._closed:
@@ -194,10 +213,9 @@ class SequenceStore:
         return int(row[0]) if row else 0
 
     def __contains__(self, sequence_id):
-        row = self._conn.execute(
-            "SELECT 1 FROM sequences WHERE sequence_id = ? LIMIT 1", (sequence_id,)
-        ).fetchone()
-        return row is not None
+        if self._id_cache is None:
+            self._id_cache = set(self.keys())
+        return sequence_id in self._id_cache
 
     def __getitem__(self, sequence_id):
         row = self._conn.execute(
@@ -803,16 +821,21 @@ def build_family_ledger(
     sequence_delimiter="|",
     options=None,
     logger=None,
+    sequence_db_path=None,
 ) -> FamilyLedger:
     logger = logger or logging.getLogger("PyamilySeq.PyamilySeq")
     _log_progress(logger, "Building canonical family ledger")
-    sequences = SequenceStore.from_fasta(
-        fasta_path,
-        memory_limit_mb=getattr(options, "mem", None),
-        buffer_cap_mb=getattr(options, "sequence_buffer_cap_mb", None),
-        temp_dir=getattr(options, "tmp_dir", None),
-        logger=logger,
-    )
+    sequence_db_path = sequence_db_path or getattr(options, "sequence_db", None)
+    if sequence_db_path:
+        sequences = SequenceStore.from_existing_db(sequence_db_path, logger=logger)
+    else:
+        sequences = SequenceStore.from_fasta(
+            fasta_path,
+            memory_limit_mb=getattr(options, "mem", None),
+            buffer_cap_mb=getattr(options, "sequence_buffer_cap_mb", None),
+            temp_dir=getattr(options, "tmp_dir", None),
+            logger=logger,
+        )
     resolver = TaxonResolver(mode=mode, mapping_path=taxon_map, sequence_delimiter=sequence_delimiter)
     _log_progress(logger, f"Parsing initial {cluster_format} clusters from {cluster_path}")
     source_families: OrderedDict[str, ParsedCluster] = OrderedDict()

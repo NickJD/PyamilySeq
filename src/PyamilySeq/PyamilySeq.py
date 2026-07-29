@@ -101,8 +101,13 @@ def main():
                                 help="Clustering format used: CD-HIT, MMseqs2, or BLAST. ")
     partial_parser.add_argument("-cluster_file", required=True,
                                 help="Cluster file containing pre-clustered groups from CD-HIT, MMseqs, BLAST etc.")
-    partial_parser.add_argument("-original_fasta", required=True,
-                                help="FASTA file used in pre-clustering (Provide sequences in DNA form).")
+    partial_parser.add_argument("-original_fasta", required=False,
+                                help="FASTA file used in pre-clustering (Provide sequences in DNA form). "
+                                     "Not required if -sequence_db is given.")
+    partial_parser.add_argument("-sequence_db", required=False,
+                                help="Checkpoint: path to a pyamilyseq_sequences_*.sqlite3 file already built "
+                                     "by a previous run (e.g. from SequenceStore.from_fasta). If given, the "
+                                     "original FASTA is NOT re-parsed - the existing database is reused directly.")
     partial_parser.add_argument("-output_dir", required=True,
                                 help="Directory for all output files.")
     partial_parser.add_argument("-reclustered", required=False,
@@ -294,6 +299,14 @@ def main():
         options.tmp_dir = fix_path(options.tmp_dir)
         os.makedirs(options.tmp_dir, exist_ok=True)
 
+    if options.run_mode == 'Partial':
+        if getattr(options, 'sequence_db', None):
+            options.sequence_db = fix_path(options.sequence_db)
+        elif not getattr(options, 'original_fasta', None):
+            sys.exit("Partial mode requires either -original_fasta or -sequence_db.")
+        if getattr(options, 'original_fasta', None):
+            options.original_fasta = fix_path(options.original_fasta)
+
     output_path = os.path.abspath(options.output_dir)
     combined_out_file = os.path.join(output_path, "combined_sequences_dna.fasta")
     clustering_output = os.path.join(output_path, 'clustering_' + options.clustering_format)
@@ -408,6 +421,7 @@ def main():
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = options.original_fasta
+                self.sequence_db = getattr(options, 'sequence_db', None)
                 self.verbose = options.verbose
                 # single-copy reporting options
                 self.single_copy_only = options.single_copy_only
