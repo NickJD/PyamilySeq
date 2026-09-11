@@ -82,7 +82,6 @@ class SequenceStore:
         self._buffer_size = 0
         self._count = 0
         self._closed = False
-        self._id_cache: set[str] | None = None
 
     @classmethod
     def from_existing_db(cls, path: str, logger=None) -> "SequenceStore":
@@ -94,11 +93,11 @@ class SequenceStore:
         if not os.path.exists(path):
             raise FamilyInputError(f"Sequence database not found: {path}")
         store = cls(path=path)
-        count = len(store)
-        if count == 0:
+        has_rows = store._conn.execute("SELECT 1 FROM sequences LIMIT 1").fetchone() is not None
+        if not has_rows:
             store.close()
             raise FamilyInputError(f"Sequence database at {path} contains no sequences")
-        _log_progress(logger, f"Reusing existing sequence database {path}", count)
+        _log_progress(logger, f"Reusing existing sequence database {path}")
         return store
 
     @classmethod
@@ -186,7 +185,6 @@ class SequenceStore:
         self._conn.commit()
         self._buffer.clear()
         self._buffer_size = 0
-        self._id_cache = None
 
     def close(self):
         if self._closed:
@@ -213,9 +211,10 @@ class SequenceStore:
         return int(row[0]) if row else 0
 
     def __contains__(self, sequence_id):
-        if self._id_cache is None:
-            self._id_cache = set(self.keys())
-        return sequence_id in self._id_cache
+        row = self._conn.execute(
+            "SELECT 1 FROM sequences WHERE sequence_id = ? LIMIT 1", (sequence_id,)
+        ).fetchone()
+        return row is not None
 
     def __getitem__(self, sequence_id):
         row = self._conn.execute(
@@ -240,15 +239,11 @@ class SequenceStore:
         return int(row[0])
 
     def keys(self):
-        for (sequence_id,) in self._conn.execute(
-            "SELECT sequence_id FROM sequences ORDER BY sequence_id"
-        ):
+        for (sequence_id,) in self._conn.execute("SELECT sequence_id FROM sequences"):
             yield sequence_id
 
     def items(self):
-        for sequence_id, sequence in self._conn.execute(
-            "SELECT sequence_id, sequence FROM sequences ORDER BY sequence_id"
-        ):
+        for sequence_id, sequence in self._conn.execute("SELECT sequence_id, sequence FROM sequences"):
             yield sequence_id, sequence
 
     def values(self):
@@ -503,15 +498,19 @@ def _edge_rows(path: str, delimiter="\t"):
 
 def iter_mmseqs_clusters(path: str, delimiter="\t", logger=None, report_every: int = 100_000):
     grouped: OrderedDict[str, list[str]] = OrderedDict()
+    seen: dict[str, set[str]] = {}
     row_count = 0
     _log_progress(logger, f"Parsing MMseqs clusters from {path}")
     for _, row in _edge_rows(path, delimiter=delimiter):
         representative, member = row[:2]
         members = grouped.setdefault(representative, [])
-        if representative not in members:
+        member_seen = seen.setdefault(representative, set())
+        if representative not in member_seen:
             members.append(representative)
-        if member not in members:
+            member_seen.add(representative)
+        if member not in member_seen:
             members.append(member)
+            member_seen.add(member)
         row_count += 1
         if report_every and row_count % report_every == 0:
             _log_progress(logger, "  MMseqs rows parsed", row_count)
@@ -794,7 +793,14 @@ class FamilyLedger:
                 "sequence_id", "family_id", "genome", "taxon", "representative",
                 "stage", "category", "source_families", "source_clusters", "assignment_status",
             ])
-            for sequence_id in sorted(self.sequences):
+            # Streamed in the sequence store's natural (physical) order rather than
+            # sorted() - at billions of records, Python's sorted() would first have
+            # to materialize every sequence_id into a list in memory before sorting,
+            # which is the same order-of-magnitude memory cost we hit earlier with
+            # the in-memory ID cache. If callers need alphabetical order, `sort` on
+            # the resulting TSV is a far cheaper external merge-sort than doing it
+            # here in Python.
+            for sequence_id in self.sequences:
                 family = self.families[self.assignment[sequence_id]]
                 writer.writerow([
                     sequence_id,

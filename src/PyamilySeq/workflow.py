@@ -165,7 +165,7 @@ def _write_gene_group_table(path, ledger, family_ids):
     selected = set(family_ids)
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-        for member in sorted(ledger.sequences):
+        for member in ledger.sequences:
             family_id = ledger.assignment[member]
             if family_id in selected:
                 writer.writerow([member, family_id])
@@ -175,7 +175,7 @@ def _write_core_group_table(path, ledger, family_ids):
     selected = set(family_ids)
     with open(path, "w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle, delimiter="\t", lineterminator="\n")
-        for member in sorted(ledger.sequences):
+        for member in ledger.sequences:
             family = ledger.families[ledger.assignment[member]]
             if family.family_id in selected:
                 writer.writerow([member, family.category])
@@ -376,14 +376,14 @@ def _write_alignment(options, ledger, family_ids):
         writer.writerows(alignment_manifest)
 
 
-def _write_statistics(path, ledger, selected_ids, categories, mode):
+def _write_statistics(path, ledger, selected_ids, categories, mode, total_sequences):
     selected = set(selected_ids)
     stage_counts = Counter(ledger.families[family_id].stage for family_id in selected)
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(f"Analysis mode: {mode}\n")
         handle.write(f"Number of genomes: {len(ledger.genomes)}\n")
         handle.write(f"Number of taxa: {len(ledger.taxa)}\n")
-        handle.write(f"Input sequences: {len(ledger.sequences)}\n")
+        handle.write(f"Input sequences: {total_sequences}\n")
         handle.write(f"Sequences assigned exactly once: {len(ledger.assignment)}\n")
         handle.write(f"Final gene families: {len(ledger.families)}\n")
         handle.write(f"Families retained after filters: {len(selected)}\n")
@@ -395,7 +395,7 @@ def _write_statistics(path, ledger, selected_ids, categories, mode):
             handle.write(f"{category}: {sum(family_id in selected for family_id in family_ids)}\n")
 
 
-def _write_run_manifest(path, options, ledger, selected_ids, mode):
+def _write_run_manifest(path, options, ledger, selected_ids, mode, total_sequences):
     manifest = {
         'schema_version': 1,
         'analysis_mode': mode,
@@ -406,9 +406,9 @@ def _write_run_manifest(path, options, ledger, selected_ids, mode):
         'reclustered_file': (
             os.path.abspath(options.reclustered) if getattr(options, 'reclustered', None) else None
         ),
-        'input_sequences': len(ledger.sequences),
+        'input_sequences': total_sequences,
         'assigned_sequences': len(ledger.assignment),
-        'exactly_once_assignment': len(ledger.assignment) == len(ledger.sequences),
+        'exactly_once_assignment': len(ledger.assignment) == total_sequences,
         'final_families': len(ledger.families),
         'selected_families': len(selected_ids),
         'genomes': len(ledger.genomes),
@@ -439,7 +439,8 @@ def run_pangenome_workflow(options, mode):
         logger=logger,
         sequence_db_path=getattr(options, "sequence_db", None),
     )
-    logger.info("Family ledger ready: %s sequences, %s final families", len(ledger.sequences), len(ledger.families))
+    total_sequences = len(ledger.sequences)
+    logger.info("Family ledger ready: %s sequences, %s final families", total_sequences, len(ledger.families))
     group_text = options.species_groups if mode == "Species" else options.core_groups
     categories, _ = classify_families(ledger, mode, group_text)
     logger.info("Classified families into %s categories", len(categories))
@@ -464,9 +465,10 @@ def run_pangenome_workflow(options, mode):
         selected_ids,
         categories,
         mode,
+        total_sequences,
     )
     _write_run_manifest(
-        os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode,
+        os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode, total_sequences,
     )
     if getattr(options, "gene_presence_absence_out", True):
         logger.info("Writing gene_presence_absence.csv")
@@ -491,7 +493,7 @@ def run_pangenome_workflow(options, mode):
         write_ledger_visualisations(options, ledger, selected_ids, categories, mode)
 
     print(
-        f"Built {len(ledger.families):,} final families from {len(ledger.sequences):,} sequences; "
+        f"Built {len(ledger.families):,} final families from {total_sequences:,} sequences; "
         f"all sequences assigned exactly once."
     )
     if len(selected_ids) != len(ledger.families):
