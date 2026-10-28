@@ -858,7 +858,9 @@ def build_family_ledger(
         for member in parsed_cluster.members:
             if member not in sequences:
                 raise FamilyInputError(
-                    f"Initial clusters contain identifier absent from FASTA: {member}"
+                    f"Initial clusters contain identifier absent from FASTA: {member}. "
+                    "The initial cluster file and -original_fasta must describe the same sequence set; "
+                    "a representative-only FASTA cannot be paired with the full original clustering."
                 )
             if member in sequence_source:
                 raise FamilyInputError(f"Sequence {member!r} occurs in more than one initial family")

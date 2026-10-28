@@ -59,8 +59,14 @@ Homepage = "https://github.com/NickJD/PyamilySeq"
     group-sizes = "PyamilySeq.Group_Sizes:main"
     Track-Family-Locations = "PyamilySeq.location_tracking:run_from_cli"
     track-family-locations = "PyamilySeq.location_tracking:run_from_cli"
+    Track-Genome-Order = "PyamilySeq.order_analysis:main"
+    track-genome-order = "PyamilySeq.order_analysis:main"
+    PyamilySeq-Cohort = "PyamilySeq.cohort_analysis:main"
+    pyamilyseq-cohort = "PyamilySeq.cohort_analysis:main"
     PyamilySeq-Validate = "PyamilySeq.validation:run_from_cli"
     pyamilyseq-validate = "PyamilySeq.validation:run_from_cli"
+    PyamilySeq-Query = "PyamilySeq.genome_reports:main"
+    pyamilyseq-query = "PyamilySeq.genome_reports:main"
 
 [tool.setuptools]
 include-package-data = true

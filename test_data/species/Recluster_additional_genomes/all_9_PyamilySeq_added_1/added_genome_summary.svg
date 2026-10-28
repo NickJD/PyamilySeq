@@ -1,0 +1,14 @@
+<svg xmlns='http://www.w3.org/2000/svg' role='img' aria-labelledby='title desc' width='100%' height='180' viewBox='0 0 1100 180'>
+<title id='title'>Added genome family links</title><desc id='desc'>Counts of genes linked to original families and genes in novel families.</desc>
+<style>text{font:15px system-ui,sans-serif;fill:#182321}.small{font-size:12px;fill:#51615c}</style>
+<text x='24' y='30' style='font:bold 21px system-ui,sans-serif'>Where the added genes land</text>
+<rect x='24' y='48' width='14' height='14' rx='3' fill='#247a62'/><text x='46' y='61'>Genes linked to original pangenome</text>
+<rect x='384' y='48' width='14' height='14' rx='3' fill='#c66a32'/><text x='406' y='61'>Genes in novel families</text>
+<text x='24' y='112'>Escherichia_coli_110957_gca_000485615.A…</text>
+<title>Escherichia_coli_110957_gca_000485615.ASM48561v1</title>
+<rect x='345.0' y='94' width='586.7' height='30' rx='3' fill='#247a62'/>
+<text x='638.4' y='114' text-anchor='middle' style='font-size:12px;fill:white'>4,451</text>
+<rect x='931.7' y='94' width='63.3' height='30' rx='3' fill='#c66a32'/>
+<text x='963.4' y='114' text-anchor='middle' style='font-size:12px;fill:white'>480</text>
+<text x='345' y='143' class='small'>Total genes: 4,931 · linked: 4,451 · novel: 480</text>
+</svg>

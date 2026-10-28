@@ -491,6 +491,14 @@ def run_pangenome_workflow(options, mode):
     if getattr(options, "visualise", False):
         logger.info("Writing visual outputs")
         write_ledger_visualisations(options, ledger, selected_ids, categories, mode)
+    if getattr(options, "added_genomes", None):
+        if not getattr(options, "reclustered", None):
+            raise FamilyInputError("--added-genomes requires -reclustered with the combined reclustering output")
+        try:
+            from .genome_reports import write_extension_report
+        except ImportError:
+            from genome_reports import write_extension_report
+        write_extension_report(output_dir, ledger, options.added_genomes)
 
     print(
         f"Built {len(ledger.families):,} final families from {total_sequences:,} sequences; "

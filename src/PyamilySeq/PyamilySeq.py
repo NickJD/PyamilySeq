@@ -68,8 +68,10 @@ def main():
     # Full Mode Subparser
     full_parser = subparsers.add_parser("Full",
                                         help="Full mode: PyamilySeq to cluster with CD-HIT and process output.")
-    #full_parser.add_argument("-clustering_format", choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
-    #                         help="Clustering format to use: CD-HIT, MMseqs2, or BLAST.")
+    # Full mode currently supports CD-HIT only. Keep the default for backward
+    # compatibility while making the runtime check below reachable.
+    full_parser.add_argument("-clustering_format", choices=['CD-HIT'], default='CD-HIT',
+                             help="Clustering format used in Full mode (CD-HIT).")
     full_parser.add_argument("-output_dir", required=True,
                              help="Directory for all output files.")
     full_parser.add_argument("-input_type", choices=['separate', 'combined', 'fasta'], required=True,
@@ -151,6 +153,8 @@ def main():
                                help="Output a tab-separated gene-to-family map using stable hashed family IDs.")
         subparser.add_argument("-core_group_table", action="store_true", dest="core_group_table",
                                help="Output a tab-separated gene-to-prevalence-category map.")
+        subparser.add_argument("--added-genomes", dest="added_genomes", default=None,
+                               help="Comma-separated genome IDs added in this reclustering run; write extension impact tables and chart.")
         subparser.add_argument("-visualise", "--visualize", action="store_true", dest="visualise",
                                help="Write SVG/HTML visual summaries of the pangenome outputs.")
         subparser.add_argument("-visualise_heatmap_limit", "--visualize-heatmap-limit", type=int, default=200,
@@ -394,6 +398,7 @@ def main():
                 self.blast_min_query_coverage = options.blast_min_query_coverage
                 self.blast_min_subject_coverage = options.blast_min_subject_coverage
                 self.blast_columns = options.blast_columns
+                self.added_genomes = options.added_genomes
 
         clustering_options = clustering_options()
 
@@ -440,6 +445,7 @@ def main():
                 self.blast_min_query_coverage = options.blast_min_query_coverage
                 self.blast_min_subject_coverage = options.blast_min_subject_coverage
                 self.blast_columns = options.blast_columns
+                self.added_genomes = options.added_genomes
 
         clustering_options = clustering_options()
 

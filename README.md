@@ -95,6 +95,38 @@ An identifier may be a complete sequence ID or a genome prefix. Exact sequence
 mappings take precedence. In Genus mode, the historical fallback is the text
 before the first underscore in the genome ID; an explicit map is recommended.
 
+## Add genomes to a reclustered pangenome
+
+Run Partial mode with the original cluster file, a FASTA containing the original
+and added genes, and a second clustering result made from that same combined
+FASTA. `--added-genomes` writes gene-level family links, a per-genome summary,
+an SVG chart, and an HTML report. `--added-genomes` accepts comma-separated IDs
+or a text file with one genome ID per line. `source_families` and `source_clusters` identify
+the original families reached by each added gene; `only_Second` families have
+no original family link.
+
+```bash
+PyamilySeq Partial \\
+  -clustering_format CD-HIT \\
+  -cluster_file original.clstr \\
+  -reclustered original_plus_new.clstr \\
+  -original_fasta original_plus_new_genes.fasta \\
+  -output_dir extension_output \\
+  --added-genomes new_isolate_1,new_isolate_2
+```
+
+## Query genomes in an existing pangenome
+
+`PyamilySeq-Query` accepts a PyamilySeq/Roary presence-absence CSV and a text
+file containing one genome column name per line. It reports family and gene
+counts for core and accessory families (core defaults to presence in at least
+99% of genomes), plus a family-level table with matching gene IDs.
+
+```bash
+PyamilySeq-Query --gpa PyamilySeq_Output/gene_presence_absence.csv \\
+  --genomes requested_genomes.txt --output-dir genome_query --core-percent 99
+```
+
 ## Clustering Inputs
 
 ### CD-HIT
@@ -282,8 +314,56 @@ HTML/SVG neighborhood views. Singleton families are included by default; use
 - `Group-Sizes`: summarize family sizes.
 - `Seq-Finder`: find matching group rows for sequence IDs.
 - `Seq-Extractor`: extract requested full sequence identifiers.
+- `Track-Genome-Order`: summarize genome contig architecture and strand-aware gene order from GFF/GFF3 files.
+- `PyamilySeq-Cohort`: prepare reproducible genome cohorts, calculate Sourmash similarity groups, run a global PyamilySeq pangenome, and stratify breakpoints by similarity group.
 
 Each command provides its full interface with `--help`.
+
+`Track-Genome-Order --gff-dir genomes --outdir genome_order --no-plots` writes
+tabular contig and gene-order reports. Add `--family-map` to compare shared
+families and infer contig orientation against a reference genome. Install
+`PyamilySeq[analysis]` to enable the figures. Orientation inference uses
+single-copy family anchors and requires both `--min-orientation-anchors` and
+`--min-orientation-tau`; ambiguous reference-contig matches remain unoriented.
+The tool expects unique GFF feature IDs for multipart features and reports
+partial family-map coverage and annotation/FASTA mismatches in `run_summary.txt`.
+
+### Cohort workflow for 100–1,000 genomes
+
+The cohort workflow validates one matching GFF and FASTA per genome, writes a
+manifest and managed input links, runs one global PyamilySeq pangenome, and uses
+Sourmash similarity groups only to stratify downstream summaries. It does not
+build separate pangenomes for each similarity group.
+
+Sourmash is an external command-line requirement for cohort similarity
+analysis. Bioconda installations should provide it as a package dependency;
+PyPI installations must install the `sourmash` command separately with
+`python -m pip install sourmash` before running the similarity stage.
+
+```bash
+PyamilySeq-Cohort prepare \
+  --fasta-dir assemblies/fasta --gff-dir assemblies/gff \
+  --metadata cohort_metadata.tsv --outdir ecoli_cohort
+
+PyamilySeq-Cohort similarity \
+  --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort \
+  --min-similarity 0.55
+
+PyamilySeq-Cohort pangenome \
+  --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort \
+  --threads 16 --memory-mb 16000
+
+PyamilySeq-Cohort order \
+  --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort \
+  --reference-genome MG1655 --no-plots
+```
+
+The Sourmash threshold is intentionally explicit and should be selected after
+reviewing the similarity matrix. Similarity groups use connected components,
+so chained links can place genomically distant samples in the same group; the
+edge table is retained to inspect those links. The main pangenome remains global.
+Order outputs include per-assembly endpoint evidence and a
+`breakpoint_support_by_similarity_group.tsv` summary with group denominators.
 
 ## Development
 

@@ -1,0 +1,31 @@
+Analysis mode: Species
+Number of genomes: 9
+Number of taxa: 9
+Input sequences: 45396
+Sequences assigned exactly once: 45396
+Final gene families: 11256
+Families retained after filters: 11256
+
+Final family stages
+First: 11256
+extended: 0
+combined: 0
+only_Second: 0
+
+Mutually exclusive final categories
+First_core_99: 3036
+First_core_95: 0
+First_core_15: 2971
+First_core_0: 5249
+extended_core_99: 0
+extended_core_95: 0
+extended_core_15: 0
+extended_core_0: 0
+combined_core_99: 0
+combined_core_95: 0
+combined_core_15: 0
+combined_core_0: 0
+only_Second_core_99: 0
+only_Second_core_95: 0
+only_Second_core_15: 0
+only_Second_core_0: 0
