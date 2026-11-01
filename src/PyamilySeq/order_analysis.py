@@ -13,6 +13,8 @@ import csv
 import gzip
 import json
 import math
+import re
+import shutil
 import statistics
 import sys
 from collections import Counter, defaultdict
@@ -74,6 +76,30 @@ class Contig:
     orientation_anchors: int = 0
     kendall_tau_raw: float | None = None
     orientation_status: str = "not_assessed"
+    replicon_id: str = ""
+    replicon_name: str = ""
+    replicon_type: str = "unknown"
+    replicon_topology: str = "unknown"
+    metadata_source: str = "unknown"
+    topology_source: str = "unknown"
+    classification_status: str = "unknown"
+    has_fasta_record: bool = False
+    has_gff_annotation: bool = False
+    sequence_record_representation: str = "linear_fasta_record"
+    sequence_role: str = ""
+    assigned_molecule: str = ""
+    assigned_molecule_location_type: str = ""
+    assembly_unit: str = ""
+    genbank_accession: str = ""
+    refseq_accession: str = ""
+    assembly_report_source: str = ""
+    matched_assembly_accession: str = ""
+    source_values: dict[str, str] = field(default_factory=dict)
+    conflict_status: str = "none"
+    resolution_explanation: str = "No explicit replicon metadata available."
+    fasta_header: str = ""
+    gff_region_evidence: list[dict] = field(default_factory=list)
+    resolved_replicon_metadata: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -243,6 +269,8 @@ def parse_gff(path: Path, requested_feature_type: str = "auto") -> Genome:
                 seen_contigs[seqid] = len(seen_contigs) + 1
             if ftype.lower() == "region":
                 region_lengths[seqid] = max(region_lengths.get(seqid, 0), end - start + 1)
+                contig_meta = genome.contigs.setdefault(seqid, Contig(name=seqid, input_order=len(seen_contigs)))
+                contig_meta.gff_region_evidence.append(dict(attrs))
             available_types.add(ftype)
             identifier = attrs.get("ID")
             if identifier:
@@ -276,9 +304,10 @@ def parse_gff(path: Path, requested_feature_type: str = "auto") -> Genome:
         source = "sequence_region" if length else "max_feature_end"
         if not length and region_lengths.get(contig_name):
             length, source = region_lengths[contig_name], "region_feature"
-        genome.contigs[contig_name] = Contig(
-            name=contig_name, length=length, length_source=source, input_order=first_seen
-        )
+        existing = genome.contigs.get(contig_name, Contig(name=contig_name))
+        existing.length, existing.length_source, existing.input_order = length, source, first_seen
+        existing.has_gff_annotation = True
+        genome.contigs[contig_name] = existing
 
     feature_type = _choose_feature_type([{"type": t} for t in available_types], requested_feature_type)
     genome.selected_feature_type = feature_type
@@ -381,9 +410,35 @@ def load_fasta_lengths(genome: Genome, fasta_dir: Path) -> tuple[dict[str, int],
                     if active in lengths:
                         raise ValueError(f"Duplicate FASTA contig identifier {active!r} in {path}")
                     lengths[active] = length
-                active = line[1:].strip().split()[0] if line[1:].strip() else ""
+                header = line[1:].strip()
+                active = header.split()[0] if header else ""
                 if not active:
                     raise ValueError(f"Empty FASTA header in {path}")
+                contig = genome.contigs.get(active)
+                if contig is None:
+                    contig = Contig(name=active, input_order=len(genome.contigs))
+                    genome.contigs[active] = contig
+                contig.fasta_header = header
+                # Use only explicit header fields. A complete-record claim does not
+                # establish circular topology; it is retained as a classification hint.
+                lower = header.casefold()
+                header_type = "plasmid" if " plasmid" in lower else ("chromosome" if " chromosome" in lower else "unknown")
+                if contig.replicon_type != "unknown" and header_type != "unknown" and contig.replicon_type != header_type:
+                    genome.warnings.append(f"{active}: conflicting replicon type in FASTA header and GFF; retaining GFF type")
+                elif contig.replicon_type == "unknown" and header_type != "unknown":
+                    contig.replicon_type = header_type
+                    contig.replicon_id = active
+                    contig.replicon_name = header.split(maxsplit=1)[1] if len(header.split(maxsplit=1)) > 1 else active
+                    contig.metadata_source = "FASTA_header"
+                    contig.classification_status = "explicit_header"
+                if "circular" in lower:
+                    if contig.replicon_topology not in {"unknown", "circular"}:
+                        genome.warnings.append(f"{active}: conflicting topology in FASTA header and GFF; retaining unknown")
+                        contig.replicon_topology, contig.topology_source = "unknown", "conflict"
+                    elif contig.replicon_topology == "unknown":
+                        contig.replicon_topology, contig.topology_source = "circular", "FASTA_header"
+                elif "linear" in lower and contig.replicon_topology == "unknown":
+                    contig.replicon_topology, contig.topology_source = "linear", "FASTA_header"
                 length = 0
             else:
                 length += len(line.strip())
@@ -394,13 +449,378 @@ def load_fasta_lengths(genome: Genome, fasta_dir: Path) -> tuple[dict[str, int],
     return lengths, None
 
 
-def apply_fasta_lengths(genomes: list[Genome], fasta_dir: Path | None) -> list[str]:
+def _metadata_value(value: object) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    return "" if text.casefold() in {"", "-", "na", "n/a", "unknown", "."} else text
+
+
+def _normalize_replicon_type(value: object) -> str:
+    text = _metadata_value(value).casefold().replace("_", "-")
+    if not text:
+        return ""
+    if "unplaced" in text or "unlocalized" in text:
+        return ""
+    if "plasmid" in text:
+        return "plasmid"
+    if "chromosome" in text or text in {"src", "chromosomal"}:
+        return "chromosome"
+    if text in {"other", "mitochondrion", "organelle"}:
+        return "other"
+    return ""
+
+
+def _normalize_topology(value: object) -> str:
+    text = _metadata_value(value).casefold()
+    if text in {"true", "yes", "1", "circular"}:
+        return "circular"
+    if text in {"false", "no", "0", "linear"}:
+        return "linear"
+    return ""
+
+
+def resolve_replicon_metadata(contig_id: str, assembly_report: dict | None = None,
+                              fasta_header: str | dict | None = None,
+                              gff_region: dict | list[dict] | None = None) -> dict:
+    """Resolve replicon metadata for one sequence record without mutating inputs.
+
+    Evidence is normalized only for comparison; all original source values are
+    returned verbatim. NCBI identity uses assigned molecule plus assembly unit.
+    A GFF feature ID or FASTA record ID alone is not treated as replicon identity.
+    """
+    if isinstance(assembly_report, list) and not assembly_report:
+        assembly_report = None
+    if isinstance(gff_region, list) and not gff_region:
+        gff_region = None
+    if isinstance(assembly_report, list):
+        results = [resolve_replicon_metadata(contig_id, row, fasta_header, gff_region)
+                   for row in assembly_report]
+        def merge_field(field):
+            vals = {r[field] for r in results if r[field] not in {"", "unknown"}}
+            return (next(iter(vals)), len(vals) > 1) if len(vals) == 1 else ("unknown", len(vals) > 1)
+        typ, tc = merge_field("replicon_type")
+        topology, toc = merge_field("replicon_topology")
+        identity, ic = merge_field("replicon_id")
+        conflicts = {x for r in results for x in r["conflict_status"].split(",") if x and x != "none"}
+        conflicts.update(k for k, v in (("type", tc), ("topology", toc), ("identity", ic)) if v)
+        base = results[0] if results else resolve_replicon_metadata(contig_id, None, fasta_header, gff_region)
+        evidence = dict(base["metadata_evidence"])
+        evidence["assembly_report"] = assembly_report
+        status = "conflict" if conflicts else ("classified" if typ != "unknown" else base["classification_status"])
+        return {**base, "replicon_id": identity, "replicon_type": typ, "replicon_topology": topology,
+                "classification_status": status, "conflict_status": ",".join(sorted(conflicts)) or "none",
+                "metadata_evidence": evidence,
+                "metadata_sources": sorted({s for r in results for s in r["metadata_sources"]}),
+                "resolution_notes": "; ".join(r["resolution_notes"] for r in results if r["resolution_notes"])}
+    if isinstance(gff_region, list):
+        results = [resolve_replicon_metadata(contig_id, assembly_report, fasta_header, region)
+                   for region in gff_region]
+        # Every row carries identical NCBI/header evidence; combine the GFF evidence
+        # and only retain a property when every explicit result agrees.
+        def merge(field):
+            values = {r[field] for r in results if r[field] not in {"", "unknown"}}
+            return (next(iter(values)), False) if len(values) == 1 else ("unknown", len(values) > 1)
+        typ, tc = merge("replicon_type")
+        topology, toc = merge("replicon_topology")
+        identity, ic = merge("replicon_id")
+        conflicts = set(x for r in results for x in r["conflict_status"].split(",") if x and x != "none")
+        conflicts.update(k for k, v in (("type", tc), ("topology", toc), ("identity", ic)) if v)
+        evidence = dict(results[0]["metadata_evidence"]) if results else {
+            "assembly_report": dict(assembly_report or {}), "fasta_header": fasta_header}
+        evidence["gff_region"] = gff_region
+        status = "conflict" if conflicts else ("classified" if typ != "unknown" else "unknown")
+        return {**(results[0] if results else {}), "contig_id": contig_id,
+                "replicon_id": identity, "replicon_type": typ, "replicon_topology": topology,
+                "classification_status": status, "conflict_status": ",".join(sorted(conflicts)) or "none",
+                "metadata_sources": sorted({source for r in results for source in r["metadata_sources"]}),
+                "metadata_evidence": evidence,
+                "resolution_notes": "; ".join(r["resolution_notes"] for r in results if r["resolution_notes"])}
+    ar = dict(assembly_report or {})
+    gff = dict(gff_region or {})
+    header_text = fasta_header if isinstance(fasta_header, str) else ""
+    fh = dict(fasta_header) if isinstance(fasta_header, dict) else {}
+    evidence = {"assembly_report": ar, "fasta_header": fasta_header, "gff_region": gff}
+    source_values = {}
+    type_values = []
+    topology_values = []
+    identity_values = []
+
+    ar_role = _metadata_value(ar.get("Sequence-Role"))
+    ar_location = _metadata_value(ar.get("Assigned-Molecule-Location/Type"))
+    ar_molecule = _metadata_value(ar.get("Assigned-Molecule"))
+    ar_unit = _metadata_value(ar.get("Assembly-Unit"))
+    ar_status = str(ar.get("classification_status", "")).casefold()
+    ar_type = "" if ar_status == "unplaced_scaffold" or "unplaced" in ar_role.casefold() else (
+        _normalize_replicon_type(ar.get("replicon_type")) or _normalize_replicon_type(ar_location))
+    if ar_type:
+        type_values.append(("assembly_report", ar_type))
+    if ar_role:
+        source_values["sequence_role"] = {"assembly_report": ar_role}
+    ar_identity = ""
+    if "unplaced" not in ar_role.casefold() and ar_molecule and ar_type in {"chromosome", "plasmid"}:
+        ar_identity = f"{ar_unit or 'assembly_unit_unknown'}:{ar_type}:{ar_molecule}"
+        identity_values.append(("assembly_report", ar_identity))
+    ar_topology = _normalize_topology(ar.get("replicon_topology"))
+    if ar_topology:
+        topology_values.append(("assembly_report", ar_topology))
+
+    header_type = _normalize_replicon_type(fh.get("replicon_type"))
+    if not header_type:
+        lower = header_text.casefold()
+        header_type = "plasmid" if " plasmid" in lower else ("chromosome" if " chromosome" in lower else "")
+    if header_type:
+        type_values.append(("fasta_header", header_type))
+    header_topology = _normalize_topology(fh.get("replicon_topology") or fh.get("topology"))
+    if not header_topology:
+        header_topology = "circular" if "circular" in header_text.casefold() else (
+            "linear" if "linear" in header_text.casefold() else "")
+    if header_topology:
+        topology_values.append(("fasta_header", header_topology))
+    header_identity = _metadata_value(fh.get("replicon_id"))
+    if header_identity:
+        identity_values.append(("fasta_header", header_identity))
+
+    gff_type = _normalize_replicon_type(gff.get("replicon_type") or gff.get("gbkey") or
+                                        gff.get("molecule_type") or gff.get("Name"))
+    if gff_type:
+        type_values.append(("gff_region", gff_type))
+    gff_topology = _normalize_topology(gff.get("Is_circular") or gff.get("is_circular") or gff.get("replicon_topology"))
+    if gff_topology:
+        topology_values.append(("gff_region", gff_topology))
+    gff_identity = _metadata_value(gff.get("replicon_id") or gff.get("replicon_accession") or gff.get("accession"))
+    if gff_identity:
+        identity_values.append(("gff_region", gff_identity))
+
+    def resolve(values):
+        distinct = {value for _, value in values}
+        return (next(iter(distinct)), False) if len(distinct) == 1 else ("unknown", len(distinct) > 1)
+
+    resolved_type, type_conflict = resolve(type_values)
+    resolved_topology, topology_conflict = resolve(topology_values)
+    resolved_identity, identity_conflict = resolve(identity_values)
+    # An unlocalized scaffold can have a known assigned molecule but not be
+    # equated with an assembled replicon fragment without other identity evidence.
+    if ar_role.casefold() == "unlocalized-scaffold" and ar_identity and not gff_identity and not header_identity:
+        resolved_identity = ar_identity
+    conflicts = [name for name, flag in (("type", type_conflict), ("topology", topology_conflict),
+                                         ("identity", identity_conflict)) if flag]
+    status = "conflict" if conflicts else ("classified" if resolved_type != "unknown" else "unknown")
+    sources = sorted({source for values in (type_values, topology_values, identity_values) for source, _ in values})
+    notes = []
+    if conflicts:
+        notes.append("Conflicting explicit evidence for: " + ", ".join(conflicts) + ".")
+    if not resolved_identity or resolved_identity == "unknown":
+        resolved_identity = "unknown"
+        notes.append("No sufficiently reliable shared replicon identity was available.")
+    if resolved_topology == "unknown":
+        notes.append("Topology remains unknown because no unambiguous explicit topology evidence was available.")
+    if ar_role.casefold() == "unplaced-scaffold":
+        resolved_identity = "unknown"
+        if not conflicts:
+            status = "unplaced_scaffold"
+        notes.append("NCBI marks this sequence as unplaced; no replicon assignment was made.")
+    return {"contig_id": contig_id, "replicon_id": resolved_identity,
+            "replicon_name": ar_molecule or _metadata_value(gff.get("replicon_name")) or _metadata_value(fh.get("replicon_name")),
+            "replicon_type": resolved_type, "replicon_topology": resolved_topology,
+            "sequence_role": ar_role or _metadata_value(gff.get("Sequence-Role")) or _metadata_value(fh.get("sequence_role")),
+            "classification_status": status,
+            "conflict_status": ",".join(conflicts) if conflicts else "none",
+            "metadata_sources": sources, "metadata_evidence": evidence,
+            "resolution_notes": " ".join(notes)}
+
+
+def parse_assembly_report(path: Path) -> dict[str, dict[str, str]]:
+    """Parse a local NCBI assembly report indexed by exact GenBank/RefSeq accession.
+
+    Each accession maps to a structured row containing the original NCBI columns,
+    normalized replicon classification, source path, and an explicit unknown
+    topology (assembly reports do not normally establish circularity).
+    """
+    required = ("Sequence-Name", "Sequence-Role", "Assigned-Molecule",
+                "Assigned-Molecule-Location/Type", "GenBank-Accn", "RefSeq-Accn",
+                "Assembly-Unit", "Sequence-Length")
+    records: dict[str, dict[str, str]] = {}
+    by_sequence_name: dict[str, dict[str, str]] = {}
+    found_header = False
+    with _open_text(path) as handle:
+        header = None
+        for line_no, line in enumerate(handle, 1):
+            if line.lstrip("\ufeff").startswith("# Sequence-Name\t"):
+                header = line.lstrip("\ufeff")[2:].rstrip("\r\n").split("\t")
+                missing = [name for name in required if name not in header]
+                if missing:
+                    raise ValueError(f"Assembly report {path} is missing columns: {', '.join(missing)}")
+                if len(header) != len(set(header)):
+                    raise ValueError(f"Assembly report {path} has duplicate column names")
+                found_header = True
+                continue
+            if not line.strip() or line.startswith("#"):
+                continue
+            if header is None:
+                raise ValueError(f"Assembly report {path} has data before its column header")
+            values = line.rstrip("\r\n").split("\t")
+            if len(values) != len(header):
+                raise ValueError(f"Assembly report {path}:{line_no} has {len(values)} fields; expected {len(header)}")
+            row = dict(zip(header, values))
+            record = {key: row.get(key, "") for key in required}
+            if not record["Sequence-Name"]:
+                raise ValueError(f"Assembly report {path}:{line_no} has an empty Sequence-Name")
+            if not record["Sequence-Length"].isdigit():
+                raise ValueError(f"Assembly report {path}:{line_no} has invalid Sequence-Length {record['Sequence-Length']!r}")
+            record["Sequence-Length"] = str(int(record["Sequence-Length"]))
+            record["source"] = str(path)
+            role = record["Sequence-Role"].casefold()
+            location = record["Assigned-Molecule-Location/Type"].casefold()
+            if "unlocalized" in role:
+                record["replicon_type"] = "unknown"
+                record["classification_status"] = "unlocalized_scaffold"
+            elif "unplaced" in role:
+                record["replicon_type"] = "unknown"
+                record["classification_status"] = "unplaced_scaffold"
+            elif "plasmid" in location:
+                record["replicon_type"] = "plasmid"
+                record["classification_status"] = "classified"
+            elif "chromosome" in location:
+                record["replicon_type"] = "chromosome"
+                record["classification_status"] = "classified"
+            elif record["Sequence-Role"]:
+                record["replicon_type"] = "other"
+                record["classification_status"] = "other_sequence"
+            else:
+                record["replicon_type"] = "unknown"
+                record["classification_status"] = "unknown"
+            record["replicon_topology"] = "unknown"
+            previous_name = by_sequence_name.get(record["Sequence-Name"])
+            if previous_name and previous_name != record:
+                raise ValueError(f"Contradictory assembly-report records for Sequence-Name {record['Sequence-Name']!r} in {path}")
+            by_sequence_name[record["Sequence-Name"]] = record
+            for accession in (record["GenBank-Accn"], record["RefSeq-Accn"]):
+                if accession and accession.strip() not in {"-", "na"}:
+                    if accession in records:
+                        kind = "contradictory" if records[accession] != record else "duplicate"
+                        raise ValueError(f"{kind.capitalize()} assembly-report record for accession {accession!r} in {path}")
+                    records[accession] = record
+    if not found_header:
+        raise ValueError(f"Assembly report {path} has no '# Sequence-Name' column header")
+    if not records:
+        raise ValueError(f"Assembly report {path} contains no records with GenBank or RefSeq accessions")
+    return records
+
+
+def _load_assembly_report_mapping(mapping_tsv: Path | None, genomes: list[Genome]) -> dict[str, Path]:
+    if mapping_tsv is None:
+        return {}
+    if not mapping_tsv.is_file():
+        raise FileNotFoundError(f"Assembly-report mapping TSV does not exist: {mapping_tsv}")
+    known = {_normalise_genome_name(g.name): g.name for g in genomes}
+    result: dict[str, Path] = {}
+    with mapping_tsv.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if not reader.fieldnames or not {"genome", "assembly_report"}.issubset(reader.fieldnames):
+            raise ValueError("Assembly-report mapping TSV must have genome and assembly_report columns")
+        for line_no, row in enumerate(reader, 2):
+            genome_raw = (row.get("genome") or "").strip()
+            report_raw = (row.get("assembly_report") or "").strip()
+            key = _normalise_genome_name(genome_raw)
+            if not key or not report_raw:
+                raise ValueError(f"Assembly-report mapping TSV row {line_no} has an empty genome or assembly_report")
+            if key not in known:
+                raise ValueError(f"Assembly-report mapping names unknown genome {genome_raw!r} at row {line_no}")
+            if known[key] in result:
+                raise ValueError(f"Duplicate assembly-report mapping for genome {known[key]!r}")
+            path = Path(report_raw)
+            if not path.is_absolute():
+                path = mapping_tsv.parent / path
+            if not path.is_file():
+                raise FileNotFoundError(f"Assembly report for genome {known[key]!r} does not exist: {path}")
+            result[known[key]] = path.resolve()
+    return result
+
+
+def collect_contig_replicon_metadata(genomes: list[Genome], fasta_dir: Path,
+                                     assembly_report_mapping: Path | None = None) -> list[dict]:
+    """Return one resolved replicon metadata row per non-empty FASTA record.
+
+    FASTA/GFF association uses exact genome stems and sequence IDs. Assembly-report
+    association is explicitly genome-mapped, then accession-matched against exact
+    header tokens. GFF-only records are intentionally omitted.
+    """
+    if not fasta_dir.is_dir():
+        raise NotADirectoryError(f"FASTA input must be an existing directory: {fasta_dir}")
+    report_paths = _load_assembly_report_mapping(assembly_report_mapping, genomes)
+    results = []
+    fasta_suffixes = tuple(s.lower() for s in FASTA_SUFFIXES)
+    for genome in sorted(genomes, key=lambda g: g.name.casefold()):
+        matches = [p for p in fasta_dir.rglob("*") if p.is_file() and p.name.lower().endswith(fasta_suffixes)
+                   and _normalise_genome_name(_stem_without_suffix(p, FASTA_SUFFIXES)) == _normalise_genome_name(genome.name)]
+        if len(matches) != 1:
+            raise ValueError(f"Expected exactly one FASTA matching genome {genome.name!r}; found {len(matches)}")
+        report_path = report_paths.get(genome.name)
+        report_index = parse_assembly_report(report_path) if report_path else {}
+        accession_pattern = re.compile(r"(?<![A-Za-z0-9])([A-Za-z]{1,6}_?\d+(?:\.\d+)?)(?![A-Za-z0-9])")
+        with _open_text(matches[0]) as handle:
+            header = None
+            seq_id = ""
+            length = 0
+            def emit_record():
+                if header is None or length <= 0:
+                    return
+                tokens = set(accession_pattern.findall(header))
+                matched = []
+                matched_genbank = set()
+                matched_refseq = set()
+                seen = set()
+                for token in sorted(tokens):
+                    rec = report_index.get(token)
+                    if rec is not None:
+                        if token == rec.get("GenBank-Accn"):
+                            matched_genbank.add(token)
+                        if token == rec.get("RefSeq-Accn"):
+                            matched_refseq.add(token)
+                        signature = tuple(sorted(rec.items()))
+                        if signature not in seen:
+                            seen.add(signature)
+                            matched.append(rec)
+                contig = genome.contigs.get(seq_id)
+                gff_regions = contig.gff_region_evidence if contig else []
+                resolved = resolve_replicon_metadata(seq_id, matched, header, gff_regions)
+                evidence = dict(resolved["metadata_evidence"])
+                evidence["assembly_report_mapping"] = str(report_path) if report_path else ""
+                evidence["matched_accessions"] = sorted(tokens & set(report_index))
+                return {"genome": genome.name, "contig": seq_id, "fasta_header": header,
+                        "contig_length": length, "gff_annotation_status": "annotated" if contig and contig.has_gff_annotation else "unannotated",
+                        "matched_genbank_accessions": sorted(matched_genbank),
+                        "matched_refseq_accessions": sorted(matched_refseq),
+                        "assembly_report_source": str(report_path) if report_path else "",
+                        **{**resolved, "metadata_evidence": evidence}}
+            for line in handle:
+                if line.startswith(">"):
+                    row = emit_record()
+                    if row:
+                        results.append(row)
+                    header = line[1:].strip()
+                    seq_id = header.split(maxsplit=1)[0] if header else ""
+                    if not seq_id:
+                        raise ValueError(f"Empty FASTA header in {matches[0]}")
+                    length = 0
+                else:
+                    length += len(line.strip())
+            row = emit_record()
+            if row:
+                results.append(row)
+    return results
+
+
+def apply_fasta_lengths(genomes: list[Genome], fasta_dir: Path | None,
+                        assembly_report_dir: Path | None = None) -> list[str]:
     warnings: list[str] = []
     if fasta_dir is None:
         return warnings
     if not fasta_dir.exists() or not fasta_dir.is_dir():
         raise NotADirectoryError(f"--fasta-dir must be an existing directory: {fasta_dir}")
     for genome in genomes:
+        gff_contigs = {name for name, contig in genome.contigs.items() if contig.has_gff_annotation or contig.genes}
         lengths, warning = load_fasta_lengths(genome, fasta_dir)
         if warning:
             warnings.append(warning)
@@ -409,21 +829,52 @@ def apply_fasta_lengths(genomes: list[Genome], fasta_dir: Path | None) -> list[s
             if contig_name in lengths:
                 contig.length = lengths[contig_name]
                 contig.length_source = "fasta"
+                contig.has_fasta_record = True
             else:
                 warnings.append(f"{genome.name}: contig {contig_name!r} absent from matching FASTA; retained GFF-derived length")
-        gff_contigs = set(genome.contigs)
         extra_fasta_contigs = sorted(set(lengths) - gff_contigs, key=str.casefold)
         if extra_fasta_contigs:
             for contig_name in extra_fasta_contigs:
                 genome.contigs[contig_name] = Contig(
                     name=contig_name, length=lengths[contig_name],
                     length_source="fasta_no_gff_features",
+                    has_fasta_record=True,
                 )
             warnings.append(
                 f"{genome.name}: FASTA contains {len(extra_fasta_contigs)} contig(s) without GFF features; "
                 "included in assembly contig counts and length/N50 summaries, but not family-anchor comparisons "
                 f"(examples: {', '.join(extra_fasta_contigs[:10])})"
             )
+    if assembly_report_dir is not None:
+        report_paths = sorted(assembly_report_dir.rglob("assembly_report.txt")) if assembly_report_dir.is_dir() else [assembly_report_dir]
+        report_index = {}
+        for report_path in report_paths:
+            report_index.update(parse_assembly_report(report_path))
+        for genome in genomes:
+            for contig in genome.contigs.values():
+                report = report_index.get(contig.name)
+                if not report:
+                    continue
+                contig.assembly_report_source = report["source"]
+                contig.matched_assembly_accession = contig.name
+                contig.sequence_role = report["Sequence-Role"]
+                contig.assigned_molecule = report["Assigned-Molecule"]
+                contig.assigned_molecule_location_type = report["Assigned-Molecule-Location/Type"]
+                contig.assembly_unit = report["Assembly-Unit"]
+                contig.genbank_accession = report["GenBank-Accn"]
+                contig.refseq_accession = report["RefSeq-Accn"]
+                contig.replicon_name = report["Assigned-Molecule"] if report["Assigned-Molecule"] != "-" else report["Sequence-Name"]
+                role = report["Sequence-Role"].casefold()
+                location = report["Assigned-Molecule-Location/Type"].casefold()
+                if "unplaced" in role or "unlocalized" in role:
+                    contig.replicon_type = "other"
+                    contig.replicon_id = ""
+                    contig.classification_status = "unplaced_sequence" if "unplaced" in role else "unlocalized_scaffold"
+                else:
+                    contig.replicon_id = report["Assigned-Molecule"] if report["Assigned-Molecule"] != "-" else ""
+                    contig.replicon_type = "plasmid" if "plasmid" in location else ("chromosome" if "chromosome" in location else "other")
+                    contig.classification_status = "assembly_report"
+                contig.metadata_source = "NCBI_assembly_report"
     return warnings
 
 
@@ -663,8 +1114,10 @@ def infer_contig_orientations(genomes: list[Genome], reference_name: str | None,
                               min_anchors: int = 5, min_abs_tau: float = 0.5) -> tuple[str | None, list[dict]]:
     if not genomes or not any(g.family for genome in genomes for g in genome.genes):
         return None, []
+    if not reference_name:
+        raise ValueError("Reference genome must be explicitly specified; no alphabetical default is selected")
     lookup = {g.name.casefold(): g for g in genomes}
-    reference = lookup.get((reference_name or "").casefold()) if reference_name else genomes[0]
+    reference = lookup.get(reference_name.casefold())
     if reference is None:
         choices = ", ".join(g.name for g in genomes)
         raise ValueError(f"Reference genome {reference_name!r} not found among inputs. Available: {choices}")
@@ -869,14 +1322,16 @@ def build_breakpoint_reports(genomes: list[Genome], reference: Genome | None, fa
                 "genes_from_left_contig_end_to_anchor": left_idx,
                 "bp_from_left_contig_end_to_anchor": (left_gene.start - 1 if contig.orientation == "forward"
                                                        else max(0, contig.length - left_gene.end)),
-                "left_boundary_support_eligible": (left_idx <= max_end_anchor_genes and
+                "left_boundary_support_eligible": (contig.length_source != "max_feature_end" and
+                    left_idx + 1 <= max_end_anchor_genes and
                     (left_gene.start - 1 if contig.orientation == "forward" else max(0, contig.length - left_gene.end)) <= max_end_anchor_bp),
                 "right_boundary_anchor_family": right_gene.family, "right_boundary_anchor_gene_id": right_gene.feature_id,
                 "right_boundary_reference_gene_order": right_rank,
                 "genes_from_right_contig_end_to_anchor": len(ordered_genes) - 1 - right_idx,
                 "bp_from_right_contig_end_to_anchor": (max(0, contig.length - right_gene.end) if contig.orientation == "forward"
                                                         else right_gene.start - 1),
-                "right_boundary_support_eligible": ((len(ordered_genes) - 1 - right_idx) <= max_end_anchor_genes and
+                "right_boundary_support_eligible": (contig.length_source != "max_feature_end" and
+                    (len(ordered_genes) - right_idx) <= max_end_anchor_genes and
                     (max(0, contig.length - right_gene.end) if contig.orientation == "forward" else right_gene.start - 1) <= max_end_anchor_bp),
                 "distance_left_anchor_to_reference_start_genes": max(0, left_rank - 1),
                 "distance_right_anchor_to_reference_end_genes": max(0, ref_gene_count - right_rank),
@@ -890,7 +1345,7 @@ def build_breakpoint_reports(genomes: list[Genome], reference: Genome | None, fa
                                   "genes_from_contig_end_to_anchor": left_idx,
                                   "bp_from_contig_end_to_anchor": (left_gene.start - 1 if contig.orientation == "forward"
                                                                     else max(0, contig.length - left_gene.end)),
-                                  "eligible": (left_idx <= max_end_anchor_genes and
+                                  "eligible": (contig.length_source != "max_feature_end" and left_idx + 1 <= max_end_anchor_genes and
                                       (left_gene.start - 1 if contig.orientation == "forward" else max(0, contig.length - left_gene.end)) <= max_end_anchor_bp),
                                   "near_reference_contig_end": left_rank <= window_genes})
             endpoint_rows.append({"genome": genome.name, "contig": contig.name, "reference_contig": ref_contig.name,
@@ -899,7 +1354,8 @@ def build_breakpoint_reports(genomes: list[Genome], reference: Genome | None, fa
                                   "genes_from_contig_end_to_anchor": len(ordered_genes) - 1 - right_idx,
                                   "bp_from_contig_end_to_anchor": (max(0, contig.length - right_gene.end) if contig.orientation == "forward"
                                                                     else right_gene.start - 1),
-                                  "eligible": ((len(ordered_genes) - 1 - right_idx) <= max_end_anchor_genes and
+                                  "eligible": (contig.length_source != "max_feature_end" and
+                                      (len(ordered_genes) - right_idx) <= max_end_anchor_genes and
                                       (max(0, contig.length - right_gene.end) if contig.orientation == "forward" else right_gene.start - 1) <= max_end_anchor_bp),
                                   "near_reference_contig_end": (ref_gene_count - right_rank) < window_genes})
 
@@ -933,9 +1389,30 @@ def build_breakpoint_reports(genomes: list[Genome], reference: Genome | None, fa
                 "genomes": ",".join(genomes_in_cluster),
                 "candidate_recurrent_region": len(genomes_in_cluster) >= 2,
                 "near_reference_contig_end": any(r["near_reference_contig_end"] for r in cluster),
-                "interpretation": "Candidate recurrent contig-end region; investigate assembly and biological alternatives.",
+                "interpretation": "Candidate recurrent reference-projected assembly-end region; descriptive screen, not a significance test or biological breakpoint.",
             })
     return breakpoint_rows, support_rows
+
+
+def build_physical_endpoint_rows(genomes: list[Genome]) -> list[dict]:
+    """Emit exactly two FASTA-coordinate endpoints for every non-empty contig record."""
+    rows = []
+    for genome in genomes:
+        for contig in genome.contigs.values():
+            if contig.length <= 0 or not contig.has_fasta_record:
+                continue
+            for side, coordinate in (("left", 1), ("right", contig.length)):
+                rows.append({"genome": genome.name, "contig": contig.name,
+                    "contig_length": contig.length, "endpoint_side": side,
+                    "physical_coordinate": coordinate, "replicon_id": contig.replicon_id,
+                    "replicon_name": contig.replicon_name, "replicon_type": contig.replicon_type,
+                    "replicon_topology": contig.replicon_topology,
+                    "metadata_source": contig.metadata_source, "topology_source": contig.topology_source,
+                    "classification_status": contig.classification_status,
+                    "reference": "", "mapped_coordinate": "",
+                    "mapping_method": "none", "mapping_confidence": 0,
+                    "anchor_count": 0, "mapping_status": "unplaced"})
+    return rows
 
 
 def _write_tsv(path: Path, rows: list[dict], fieldnames: list[str] | None = None) -> None:
@@ -949,9 +1426,286 @@ def _write_tsv(path: Path, rows: list[dict], fieldnames: list[str] | None = None
             writer.writerows(rows)
 
 
+def _read_mapping_tsv(path: Path, required: tuple[str, ...]) -> list[dict[str, str]]:
+    if not path.is_file():
+        raise FileNotFoundError(f"Mapping file does not exist: {path}")
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        if not reader.fieldnames or not set(required).issubset(reader.fieldnames):
+            raise ValueError(f"{path} must contain TSV columns: {', '.join(required)}")
+        return [{key: (row.get(key) or "").strip() for key in reader.fieldnames}
+                for row in reader]
+
+
+def build_reference_reports(genomes: list[Genome], replicon_metadata: list[dict], outdir: Path,
+                            fasta_dir: Path | None, subcohort_map: Path | None = None,
+                            reference_map: Path | None = None, assembly_metadata: Path | None = None,
+                            similarity_matrix: Path | None = None,
+                            legacy_reference: str | None = None, write_outputs: bool = True) -> dict:
+    """Validate explicit sub-cohort/reference maps and write transparent candidate reports."""
+    by_genome = {_normalise_genome_name(g.name): g for g in genomes}
+    assignments = {key: "default" for key in by_genome}
+    if subcohort_map:
+        assignments = {}
+        for line, row in enumerate(_read_mapping_tsv(subcohort_map, ("genome", "subcohort")), 2):
+            genome, cohort = row["genome"], row["subcohort"]
+            key = _normalise_genome_name(genome)
+            if not genome or not cohort:
+                raise ValueError(f"Sub-cohort map row {line} has an empty genome or subcohort")
+            if key not in by_genome:
+                raise ValueError(f"Sub-cohort map names unknown genome {genome!r} at row {line}")
+            if key in assignments:
+                raise ValueError(f"Duplicate sub-cohort assignment for genome {genome!r}")
+            assignments[key] = cohort
+        missing = [g.name for key, g in by_genome.items() if key not in assignments]
+        if missing:
+            raise ValueError("Sub-cohort map is missing genome assignments: " + ", ".join(missing))
+
+    cohort_names = sorted(set(assignments.values()), key=str.casefold)
+    selected: dict[str, str] = {}
+    selected_presets: dict[str, str] = {}
+    if legacy_reference and reference_map:
+        raise ValueError("Use either --reference-genome or --reference-map, not both")
+    if legacy_reference:
+        if len(cohort_names) != 1:
+            raise ValueError("--reference-genome cannot define references for multiple subcohorts; use --reference-map")
+        key = _normalise_genome_name(legacy_reference)
+        if key not in by_genome:
+            raise ValueError(f"Reference genome {legacy_reference!r} is absent from the input cohort")
+        selected[cohort_names[0]] = by_genome[key].name
+    if reference_map:
+        for line, row in enumerate(_read_mapping_tsv(reference_map, ("subcohort", "reference_genome")), 2):
+            cohort, reference = row["subcohort"], row["reference_genome"]
+            if not cohort or not reference:
+                raise ValueError(f"Reference map row {line} has an empty subcohort or reference_genome")
+            if cohort not in cohort_names:
+                raise ValueError(f"Reference map names unknown subcohort {cohort!r} at row {line}")
+            if cohort in selected:
+                raise ValueError(f"Duplicate reference assignment for subcohort {cohort!r}")
+            key = _normalise_genome_name(reference)
+            if key not in by_genome:
+                raise ValueError(f"Reference genome {reference!r} is absent from the input cohort")
+            if assignments[key] != cohort:
+                raise ValueError(f"Reference genome {reference!r} is assigned to {assignments[key]!r}, not {cohort!r}")
+            if not fasta_dir:
+                raise ValueError(f"Reference genome {reference!r} requires --fasta-dir")
+            g = by_genome[key]
+            fasta_matches = [p for p in fasta_dir.rglob("*") if p.is_file() and p.name.lower().endswith(FASTA_SUFFIXES)
+                             and _normalise_genome_name(_stem_without_suffix(p, FASTA_SUFFIXES)) == key]
+            if len(fasta_matches) != 1:
+                raise ValueError(f"Reference genome {reference!r} must have exactly one matching FASTA assembly")
+            if not g.genes or not g.selected_feature_type:
+                raise ValueError(f"Reference genome {reference!r} has no usable GFF annotation for gene-family landmarks")
+            rows = [r for r in replicon_metadata if _normalise_genome_name(r["genome"]) == key]
+            if not rows or len({r["contig"] for r in rows}) != len(rows):
+                raise ValueError(f"Reference genome {reference!r} has missing or inconsistent FASTA sequence metadata")
+            conflicts = [r["contig"] for r in rows if r.get("conflict_status", "none") != "none"]
+            if conflicts:
+                raise ValueError(f"Reference genome {reference!r} has conflicting replicon metadata for: {', '.join(conflicts)}")
+            selected[cohort] = g.name
+                cohort_preset = row.get("minimap2_preset", "")
+                if cohort_preset:
+                    if cohort_preset not in {"asm5", "asm10", "asm20"}:
+                        raise ValueError(f"Unsupported minimap2_preset {cohort_preset!r} for subcohort {cohort!r}; choose asm5, asm10, or asm20")
+                    selected_presets[cohort] = cohort_preset
+        missing = sorted(set(cohort_names) - set(selected), key=str.casefold)
+        if missing:
+            raise ValueError("Reference map is missing sub-cohort assignments: " + ", ".join(missing))
+
+    extra_metadata: dict[str, dict[str, str]] = {}
+    if assembly_metadata:
+        for line, row in enumerate(_read_mapping_tsv(assembly_metadata, ("genome",)), 2):
+            key = _normalise_genome_name(row["genome"])
+            if key not in by_genome:
+                raise ValueError(f"Assembly metadata names unknown genome {row['genome']!r} at row {line}")
+            if key in extra_metadata:
+                raise ValueError(f"Duplicate assembly metadata for genome {row['genome']!r}")
+            extra_metadata[key] = row
+
+    similarity: dict[tuple[str, str], float] = {}
+    if similarity_matrix:
+        with similarity_matrix.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.reader(handle))
+        if len(rows) < 2 or len(rows[0]) < 2:
+            raise ValueError("Similarity matrix must be a labeled square CSV with a header row and one row per genome")
+        labeled_rows = rows[0][0].strip() == ""
+        if labeled_rows:
+            labels = [x.strip() for x in rows[0][1:]]
+            data_rows = rows[1:]
+            if len(data_rows) != len(labels):
+                raise ValueError("Similarity matrix must be square")
+        else:
+            labels = [x.strip() for x in rows[0]]
+            data_rows = rows[1:]
+            if len(data_rows) != len(labels):
+                raise ValueError("Similarity matrix must be square")
+        if len(set(map(_normalise_genome_name, labels))) != len(labels):
+            raise ValueError("Similarity matrix has duplicate genome labels")
+        for index, row in enumerate(data_rows):
+            expected = len(labels) + 1 if labeled_rows else len(labels)
+            if len(row) != expected:
+                raise ValueError("Similarity matrix rows must match the header width")
+            row_label = row[0] if labeled_rows else labels[index]
+            if labeled_rows and _normalise_genome_name(row_label) != _normalise_genome_name(labels[index]):
+                raise ValueError("Similarity matrix row and column labels are not in matching order")
+            values = row[1:] if labeled_rows else row
+            for label, value in zip(labels, values):
+                try:
+                    similarity[(_normalise_genome_name(row_label), _normalise_genome_name(label))] = float(value)
+                except ValueError as exc:
+                    raise ValueError(f"Non-numeric similarity in {similarity_matrix}") from exc
+
+    fasta_paths = {}
+    if fasta_dir:
+        for path in fasta_dir.rglob("*"):
+            if path.is_file() and path.name.lower().endswith(FASTA_SUFFIXES):
+                fasta_paths.setdefault(_normalise_genome_name(_stem_without_suffix(path, FASTA_SUFFIXES)), []).append(path)
+    metadata_by_genome: dict[str, list[dict]] = defaultdict(list)
+    for row in replicon_metadata:
+        metadata_by_genome[_normalise_genome_name(row["genome"])].append(row)
+
+    candidate_rows = []
+    stats = {}
+    for key, genome in by_genome.items():
+        fasta_contigs = [c for c in genome.contigs.values() if c.has_fasta_record]
+        lengths = sorted((c.length for c in fasta_contigs), reverse=True)
+        n50, _l50 = _contig_n50(lengths)
+        total = sum(lengths)
+        rep_rows = metadata_by_genome.get(key, [])
+        known = sum(all(r.get(field) not in (None, "", "unknown") for field in
+                        ("replicon_id", "replicon_type", "replicon_topology")) for r in rep_rows)
+        types = {r.get("replicon_type") for r in rep_rows}
+        cohort = assignments[key]
+        peers = [other for other, group in assignments.items() if group == cohort and other != key]
+        vals = [similarity[(key, peer)] for peer in peers if (key, peer) in similarity]
+        warnings = []
+        if not fasta_contigs: warnings.append("FASTA assembly unavailable")
+        if not genome.genes: warnings.append("GFF annotation unavailable")
+        if not rep_rows: warnings.append("replicon metadata unavailable")
+        if extra_metadata.get(key, {}).get("assembly_level") in (None, ""):
+            warnings.append("assembly level not supplied")
+        if extra_metadata.get(key, {}).get("completeness") in (None, ""):
+            warnings.append("completeness metadata not supplied")
+        stats[key] = {"length": total, "n50": n50, "ncontigs": len(fasta_contigs), "known_replicons": known,
+                      "metadata_n": len(rep_rows), "annotations": len(genome.genes), "conflicts": sum(r.get("conflict_status", "none") != "none" for r in rep_rows)}
+        candidate_rows.append({
+            "genome": genome.name, "subcohort": cohort, "n_fasta_contigs": len(fasta_contigs),
+            "n_gff_annotated_contigs": sum(c.has_gff_annotation and c.has_fasta_record for c in genome.contigs.values()),
+            "assembly_length_bp": total, "n50_bp": n50,
+            "assembly_level": extra_metadata.get(key, {}).get("assembly_level", ""),
+            "completeness": extra_metadata.get(key, {}).get("completeness", ""),
+            "has_chromosome_annotation": "yes" if "chromosome" in types else "no" if rep_rows else "unknown",
+            "has_plasmid_annotation": "yes" if "plasmid" in types else "no" if rep_rows else "unknown",
+            "replicon_metadata_completeness": f"{known}/{len(rep_rows)}" if rep_rows else "unknown",
+            "replicon_metadata_conflict_count": stats[key]["conflicts"],
+            "sourmash_within_subcohort_n": len(vals), "sourmash_mean_similarity": statistics.mean(vals) if vals else "",
+            "sourmash_min_similarity": min(vals) if vals else "", "sourmash_max_similarity": max(vals) if vals else "",
+            "reference_suitability_warnings": "; ".join(warnings),
+        })
+    # A transparent lexicographic review order; this is not a completeness score and never selects a reference.
+    for cohort in cohort_names:
+        group = [r for r in candidate_rows if r["subcohort"] == cohort]
+        group.sort(key=lambda r: (stats[_normalise_genome_name(r["genome"])]["conflicts"],
+                                  -stats[_normalise_genome_name(r["genome"])]["known_replicons"],
+                                  -r["n_gff_annotated_contigs"], -r["n50_bp"], r["n_fasta_contigs"], r["genome"].casefold()))
+        for rank, row in enumerate(group, 1):
+            row["candidate_review_rank"] = rank
+            row["recommendation"] = "candidate for manual review; not selected"
+            row["candidate_review_basis"] = "conflict count ascending; known replicon records descending; GFF-annotated contigs descending; N50 descending; FASTA contig count ascending; genome ID ascending"
+    candidate_rows.sort(key=lambda r: (r["subcohort"].casefold(), r["candidate_review_rank"]))
+    if write_outputs:
+        _write_tsv(outdir / "reference_candidates.tsv", candidate_rows)
+
+    manifest_rows = []
+    for cohort in cohort_names:
+        ref_name = selected.get(cohort, "")
+        key = _normalise_genome_name(ref_name) if ref_name else ""
+        genome = by_genome.get(key) if key else None
+        rep_rows = metadata_by_genome.get(key, []) if key else []
+        replicons = {}
+        for row in rep_rows:
+            rid = row.get("replicon_id", "unknown")
+            group_id = rid if rid not in ("", "unknown") else f"unknown:{row['contig']}"
+            replicons.setdefault(group_id, {"replicon_id": rid, "replicon_type": row.get("replicon_type", "unknown"),
+                                       "replicon_topology": row.get("replicon_topology", "unknown"), "contigs": []})["contigs"].append(row["contig"])
+        warnings = [] if ref_name else ["No reference was specified; candidate ranking is advisory and no genome was selected."]
+        if genome and not genome.genes: warnings.append("No GFF annotation available for family landmarks.")
+        assembly = stats[key] if key else {}
+        fasta = fasta_paths.get(key, []) if key else []
+        if ref_name and not fasta:
+            warnings.append("Reference FASTA path is unavailable; selection metadata only.")
+        manifest_rows.append({"subcohort": cohort, "selected_reference_genome": ref_name,
+            "selection_method": "user-specified" if ref_name else "not_selected",
+            "reference_fasta_path": str(fasta[0]) if len(fasta) == 1 else "",
+            "reference_gff_path": str(genome.path) if genome else "",
+            "assembly_length_bp": assembly.get("length", ""), "n50_bp": assembly.get("n50", ""),
+            "n_contigs": assembly.get("ncontigs", ""), "reference_replicons": json.dumps(list(replicons.values()), sort_keys=True),
+            "available_annotations": genome.selected_feature_type if genome and genome.genes else "",
+            "selection_warnings": "; ".join(warnings)})
+    if write_outputs:
+        _write_tsv(outdir / "reference_manifest.tsv", manifest_rows)
+    return {"candidate_count": len(candidate_rows), "subcohort_count": len(cohort_names),
+            "selected_references": selected, "assignments": assignments,
+            "presets": selected_presets}
+
+
+def build_contig_end_gene_candidates(genomes: list[Genome], max_end_anchor_genes: int = 5,
+                                    max_end_anchor_bp: int = 10000) -> list[dict]:
+    """Report annotated genes near physical contig ends as review candidates.
+
+    Proximity and annotation flags do not establish truncation; they identify
+    loci that deserve sequence-level inspection.
+    """
+    rows = []
+    for genome in genomes:
+        for contig in genome.contigs.values():
+            ordered = sorted(contig.genes, key=lambda gene: (gene.start, gene.end, gene.feature_id.casefold()))
+            count = len(ordered)
+            for index, gene in enumerate(ordered):
+                left_bp = max(0, gene.start - 1)
+                right_bp = max(0, contig.length - gene.end)
+                near_left = index + 1 <= max_end_anchor_genes and left_bp <= max_end_anchor_bp
+                near_right = (contig.length_source != "max_feature_end" and
+                              count - index <= max_end_anchor_genes and right_bp <= max_end_anchor_bp)
+                flags = []
+                for key in ("partial", "pseudo", "pseudogene", "start_range", "end_range", "exception",
+                            "frameshift", "ribosomal_slippage"):
+                    value = gene.attributes.get(key, "")
+                    normalized = value.casefold().strip()
+                    # Pyrodigal encodes the two partial-boundary states as
+                    # binary digits (00 = complete, 10/01/11 = partial).
+                    if key == "partial" and normalized.isdigit():
+                        if any(digit != "0" for digit in normalized):
+                            flags.append(f"{key}={value}")
+                        continue
+                    if normalized and normalized not in {"false", "0", "no", "none", "00"}:
+                        flags.append(f"{key}={value}")
+                if not (near_left or near_right or flags):
+                    continue
+                rows.append({
+                    "genome": genome.name, "contig": contig.name, "contig_length_bp": contig.length,
+                    "length_source": contig.length_source,
+                    "gene_id": gene.feature_id, "family": gene.family, "product": gene.product,
+                    "start": gene.start, "end": gene.end, "strand": gene.strand, "gene_length_bp": gene.length,
+                    "genes_from_left_contig_end": index,
+                    "bp_from_left_contig_end": left_bp,
+                    "genes_from_right_contig_end": count - index - 1,
+                    "bp_from_right_contig_end": right_bp,
+                    "near_left_end": near_left, "near_right_end": near_right,
+                    "annotation_flags": ";".join(flags),
+                    "candidate_reason": ";".join(
+                        reason for reason, present in (("near_contig_end", near_left or near_right),
+                                                       ("partial_or_disrupted_annotation_flag", bool(flags))) if present
+                    ),
+                    "interpretation": "Candidate only; end proximity or annotation flags do not prove truncation or gene loss.",
+                })
+    return rows
+
+
 def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | None,
                   reference_genome: str | None, orientation_rows: list[dict], breakpoint_window_genes: int = 10,
-                  max_end_anchor_genes: int = 5, max_end_anchor_bp: int = 10000) -> dict:
+                  max_end_anchor_genes: int = 5, max_end_anchor_bp: int = 10000,
+                  replicon_metadata: list[dict] | None = None) -> dict:
     outdir.mkdir(parents=True, exist_ok=True)
     genome_rows: list[dict] = []
     contig_rows: list[dict] = []
@@ -960,6 +1714,7 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
     comparison_rows: list[dict] = []
     order_metric_rows: list[dict] = []
     reference = next((g for g in genomes if reference_genome and g.name.casefold() == reference_genome.casefold()), None)
+    replicon_lookup = {(row["genome"], row["contig"]): row for row in (replicon_metadata or [])}
     ref_counts = Counter(g.family for g in reference.genes if g.family) if reference else Counter()
     ref_unique = _single_copy_families(reference) if reference else {}
 
@@ -976,7 +1731,10 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
         gene_density = (sum(g.length for g in genome.genes) / genome_length) if genome_length else 0.0
         genome_rows.append({
             "genome": genome.name, "gff": str(genome.path), "selected_feature_type": genome.selected_feature_type,
-            "n_contigs": len(contigs), "n_genes": len(genome.genes), "total_contig_length_bp": genome_length,
+            "n_contigs": len(contigs), "n_fasta_contigs": sum(c.has_fasta_record for c in contigs),
+            "n_gff_annotated_contigs": sum(c.has_gff_annotation for c in contigs),
+            "n_gff_only_contigs": sum(c.has_gff_annotation and not c.has_fasta_record for c in contigs),
+            "n_genes": len(genome.genes), "total_contig_length_bp": genome_length,
             "length_basis": ";".join(sorted({c.length_source for c in contigs})),
             "longest_contig_bp": max(lengths, default=0), "n50_bp": n50, "l50_contigs": l50,
             "median_contig_length_bp": statistics.median(lengths) if lengths else 0,
@@ -998,6 +1756,8 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
                 "genome": genome.name, "contig": contig.name, "contig_rank_by_length": rank,
                 "input_contig_order": contig.input_order, "contig_length_bp": contig.length,
                 "length_source": contig.length_source, "n_genes": len(genes),
+                "has_fasta_record": contig.has_fasta_record,
+                "has_gff_annotation": contig.has_gff_annotation,
                 "first_gene_start": min((g.start for g in genes), default=""),
                 "last_gene_end": max((g.end for g in genes), default=""),
                 "plus_strand_genes": strand_counts.get("+", 0), "minus_strand_genes": strand_counts.get("-", 0),
@@ -1110,6 +1870,55 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
         window_genes=breakpoint_window_genes, max_end_anchor_genes=max_end_anchor_genes,
         max_end_anchor_bp=max_end_anchor_bp,
     )
+    physical_endpoint_rows = build_physical_endpoint_rows(genomes)
+    for endpoint in physical_endpoint_rows:
+        metadata = replicon_lookup.get((endpoint["genome"], endpoint["contig"]), {})
+        for field in ("replicon_id", "replicon_name", "replicon_type", "replicon_topology",
+                      "sequence_role", "classification_status", "conflict_status"):
+            endpoint[field] = metadata.get(field, "unknown" if field in {"replicon_type", "replicon_topology"} else "")
+        endpoint["metadata_sources"] = json.dumps(metadata.get("metadata_sources", []), sort_keys=True)
+        endpoint["metadata_source"] = endpoint["metadata_sources"]
+        endpoint["topology_source"] = json.dumps({
+            source: values for source, values in metadata.get("metadata_evidence", {}).items()
+            if source in {"fasta_header", "gff_region", "assembly_report"}
+        }, sort_keys=True) if metadata.get("replicon_topology") != "unknown" else ""
+        endpoint["metadata_evidence"] = json.dumps(metadata.get("metadata_evidence", {}), sort_keys=True)
+        endpoint["resolution_notes"] = metadata.get("resolution_notes", "")
+        endpoint["matched_accessions"] = json.dumps({
+            "genbank": metadata.get("matched_genbank_accessions", []),
+            "refseq": metadata.get("matched_refseq_accessions", []),
+        }, sort_keys=True)
+        endpoint["assembly_report_path"] = metadata.get("assembly_report_source", "")
+        endpoint["has_gff_annotation"] = metadata.get("gff_annotation_status") == "annotated"
+    _write_tsv(outdir / "physical_endpoints.tsv", physical_endpoint_rows, [
+        "genome", "contig", "contig_length", "endpoint_side", "physical_coordinate", "replicon_id",
+        "replicon_name", "replicon_type", "replicon_topology", "metadata_source", "topology_source",
+        "sequence_role", "classification_status", "conflict_status", "metadata_sources", "metadata_evidence",
+        "resolution_notes", "matched_accessions", "assembly_report_path", "has_gff_annotation",
+        "reference", "mapped_coordinate", "mapping_method", "mapping_confidence", "anchor_count", "mapping_status",
+    ])
+    manifest_rows = []
+    for row in replicon_metadata or []:
+        manifest_rows.append({
+            "genome": row["genome"], "contig": row["contig"], "contig_length": row["contig_length"],
+            "has_gff_annotation": row["gff_annotation_status"] == "annotated",
+            "replicon_id": row.get("replicon_id", ""), "replicon_name": row.get("replicon_name", ""),
+            "replicon_type": row.get("replicon_type", "unknown"),
+            "replicon_topology": row.get("replicon_topology", "unknown"),
+            "sequence_role": row.get("sequence_role", ""),
+            "classification_status": row.get("classification_status", "unknown"),
+            "conflict_status": row.get("conflict_status", "none"),
+            "metadata_sources": json.dumps(row.get("metadata_sources", []), sort_keys=True),
+            "metadata_evidence": json.dumps(row.get("metadata_evidence", {}), sort_keys=True),
+            "resolution_notes": row.get("resolution_notes", ""),
+            "matched_accessions": json.dumps({"genbank": row.get("matched_genbank_accessions", []),
+                                               "refseq": row.get("matched_refseq_accessions", [])}, sort_keys=True),
+            "assembly_report_path": row.get("assembly_report_source", ""),
+        })
+    manifest_fields = ["genome", "contig", "contig_length", "has_gff_annotation", "replicon_id", "replicon_name",
+        "replicon_type", "replicon_topology", "sequence_role", "classification_status", "conflict_status",
+        "metadata_sources", "metadata_evidence", "resolution_notes", "matched_accessions", "assembly_report_path"]
+    _write_tsv(outdir / "replicon_manifest.tsv", manifest_rows, manifest_fields)
     _write_tsv(outdir / "contig_breakpoints_vs_reference.tsv", breakpoint_rows, [
         "genome", "contig", "contig_length_bp", "orientation", "reference_genome", "reference_contig",
         "unique_shared_families", "reference_gene_count", "reference_order_min_anchor", "reference_order_max_anchor",
@@ -1125,6 +1934,15 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
         "reference_gene_order_median", "n_contig_end_observations", "n_distinct_genomes", "genomes",
         "candidate_recurrent_region", "near_reference_contig_end", "interpretation",
     ])
+    contig_end_candidates = build_contig_end_gene_candidates(
+        genomes, max_end_anchor_genes=max_end_anchor_genes, max_end_anchor_bp=max_end_anchor_bp
+    )
+    _write_tsv(outdir / "contig_end_gene_candidates.tsv", contig_end_candidates, [
+        "genome", "contig", "contig_length_bp", "length_source", "gene_id", "family", "product", "start", "end", "strand",
+        "gene_length_bp", "genes_from_left_contig_end", "bp_from_left_contig_end",
+        "genes_from_right_contig_end", "bp_from_right_contig_end", "near_left_end", "near_right_end",
+        "annotation_flags", "candidate_reason", "interpretation",
+    ])
 
     return {
         "n_genomes": len(genomes), "n_contigs": sum(len(g.contigs) for g in genomes),
@@ -1132,6 +1950,7 @@ def build_reports(genomes: list[Genome], outdir: Path, family_map: FamilyMap | N
         "reference_genome": reference.name if reference else "", "n_contig_orientation_records": len(orientation_rows),
         "n_family_order_matches": len(comparison_rows), "n_contig_breakpoints_mapped": len(breakpoint_rows),
         "n_recurrent_breakpoint_regions": sum(1 for r in breakpoint_support_rows if r["candidate_recurrent_region"]),
+        "n_contig_end_gene_candidates": len(contig_end_candidates),
         "n_genomes_with_warnings": sum(1 for g in genomes if g.warnings),
     }
 
@@ -1351,7 +2170,7 @@ def make_breakpoint_support_plot(outdir: Path, bin_percent: int = 2) -> list[str
     selected = [row for row in rows if row["reference_contig"] == ref_contig]
     gene_order_path = outdir / "gene_order.tsv"
     if not gene_order_path.exists():
-        return ["Breakpoint overview skipped because gene_order.tsv is unavailable for physical reference coordinates."]
+        return ["Assembly-end overview skipped because gene_order.tsv is unavailable for physical reference coordinates."]
     ref_genome = selected[0]["reference_genome"]
     reference_genes: list[tuple[int, float, int]] = []
     with gene_order_path.open("r", encoding="utf-8", newline="") as handle:
@@ -1361,7 +2180,7 @@ def make_breakpoint_support_plot(outdir: Path, bin_percent: int = 2) -> list[str
                                         int(gene["contig_length_bp"])))
     reference_genes.sort()
     if not reference_genes:
-        return ["Breakpoint overview skipped because reference gene coordinates were not found."]
+        return ["Assembly-end overview skipped because reference gene coordinates were not found."]
     ref_length = reference_genes[0][2]
     gene_count = len(reference_genes)
 
@@ -1393,7 +2212,7 @@ def make_breakpoint_support_plot(outdir: Path, bin_percent: int = 2) -> list[str
     ax.set(xlim=(0, 100), ylim=(0, max(1, peak * 1.18)),
            xlabel="Reference chromosome position (%)",
            ylabel="Genomes with a contig end in bin",
-           title=f"Where assemblies break along the reference chromosome ({ref_contig})")
+           title=f"Reference-projected contig-end locations ({ref_contig})")
     ax.set_xticks(range(0, 101, 10))
     ax.grid(axis="y", linestyle=":", linewidth=0.6, alpha=0.55)
     ax.set_axisbelow(True)
@@ -1404,7 +2223,7 @@ def make_breakpoint_support_plot(outdir: Path, bin_percent: int = 2) -> list[str
     fig.savefig(outdir / "figures" / "assembly_breakpoint_support.png", dpi=220, bbox_inches="tight")
     fig.savefig(outdir / "figures" / "assembly_breakpoint_support.svg", bbox_inches="tight")
     plt.close(fig)
-    return [f"Breakpoint overview plots the largest reference replicon ({ref_contig}); full per-contig results remain in TSV reports."]
+    return [f"Assembly-end overview plots the largest reference replicon ({ref_contig}); full per-contig results remain in TSV reports."]
 
 
 def write_run_summary(outdir: Path, genomes: list[Genome], counts: dict, warnings: list[str],
@@ -1422,14 +2241,15 @@ def write_run_summary(outdir: Path, genomes: list[Genome], counts: dict, warning
         f"Genes/loci parsed: {counts['n_genes']}",
         f"Genes mapped to a family: {counts['n_family_mapped_genes']}",
         f"Contigs with reference-projected breakpoints: {counts.get('n_contig_breakpoints_mapped', 0)}",
-        f"Candidate recurrent breakpoint regions (seen in at least two genomes): {counts.get('n_recurrent_breakpoint_regions', 0)}",
+        f"Candidate recurrent reference-projected assembly-end regions (descriptive, not significance-tested): {counts.get('n_recurrent_breakpoint_regions', 0)}",
+        f"Genes near contig ends or with partial/disruption annotation flags: {counts.get('n_contig_end_gene_candidates', 0)}",
         f"Reference genome: {reference_genome or 'not set'}",
         f"Family map: {family_map.source if family_map else 'not supplied'}",
         f"Genomes with parser warnings: {counts['n_genomes_with_warnings']}",
         "",
         "Interpretation notes",
         "- Contig ranks are assigned within each genome by descending contig length, with contig ID as a deterministic tie-breaker.",
-        "- Length source is recorded per contig. Without a FASTA or explicit GFF sequence length, length is estimated from the maximum observed feature end and may be too short.",
+        "- Endpoint support requires FASTA or explicit GFF sequence length. Contigs sized only by maximum observed feature end are excluded from endpoint-support counts.",
         "- A GFF-only run describes gene coordinates and strands, but cannot establish homologous contig orientation between genomes.",
         "- Reference-relative orientation uses families present once per genome and the reference contig with the most shared anchors; the configured minimum anchor count and absolute Kendall tau are required, and tied reference-contig matches remain undetermined.",
         "- Contig ranks are assembly descriptions, not evidence that contigs occupy the same biological position across genomes.",
@@ -1444,8 +2264,9 @@ def write_run_summary(outdir: Path, genomes: list[Genome], counts: dict, warning
         "- contig_orientation.tsv: evidence and decision for reference-relative orientation.",
         "- gene_order_metrics_vs_reference.tsv: strand-aware order-concordance metrics when a family map and reference are supplied.",
         "- family_order_matches.tsv: matched single-copy family anchors and their order in query/reference contigs.",
-        "- contig_breakpoints_vs_reference.tsv: inferred contig ends projected onto reference gene order.",
-        "- assembly_breakpoint_support.tsv: clusters of nearby contig ends recurring across genomes.",
+        "- contig_breakpoints_vs_reference.tsv: contig ends projected onto reference gene order; eligible endpoints require known contig lengths.",
+        "- assembly_breakpoint_support.tsv: descriptive clusters of nearby reference-projected assembly ends; not a significance test.",
+        "- contig_end_gene_candidates.tsv: genes near physical contig ends or carrying annotation flags; candidates require sequence-level validation.",
         "- figures/: contig size profiles, directional genome tracks, reference dotplots, and breakpoint support plots when applicable.",
     ]
     if not family_map or counts.get("n_family_mapped_genes", 0) == 0:
@@ -1494,17 +2315,33 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--pattern", default="*", help="Recursive file-name glob applied under --gff-dir; suffix must still be a recognised GFF/GFF3 suffix.")
     parser.add_argument("--feature-type", default="auto", help="Feature type in GFF column 3. 'auto' prefers CDS, then gene, then RNA-like features.")
     parser.add_argument("--fasta-dir", type=Path, help="Optional FASTA directory for exact contig lengths; file stems should match GFF stems.")
+    parser.add_argument("--assembly-report-map", type=Path,
+                        help="Optional TSV with genome and assembly_report columns; relative report paths resolve from the TSV directory.")
+    parser.add_argument("--subcohort-map", type=Path, help="Optional TSV with genome and subcohort columns; every input genome must be assigned exactly once.")
+    parser.add_argument("--reference-map", type=Path, help="Optional TSV with subcohort and reference_genome columns; exactly one explicit reference is required per subcohort.")
+    parser.add_argument("--minimap2-preset", choices=("asm5", "asm10", "asm20"), default="asm10",
+                        help="Explicit minimap2 assembly preset used for nucleotide contig placement; a per-subcohort value in --reference-map overrides this.")
+    parser.add_argument("--minimap2", default="minimap2", help="Path or executable name for minimap2.")
+    parser.add_argument("--threads", type=int, default=1, help="Threads used by minimap2.")
+    parser.add_argument("--placement-min-aligned-fraction", type=float, default=0.8,
+                        help="Minimum query fraction covered for a confident placement (0 to 1].")
+    parser.add_argument("--placement-min-mapq", type=int, default=20,
+                        help="Minimum minimap2 MAPQ for a confident placement; MAPQ is not a calibrated probability.")
+    parser.add_argument("--placement-min-block-length", type=int, default=1000,
+                        help="Minimum alignment block length considered for confident placement.")
+    parser.add_argument("--assembly-metadata", type=Path, help="Optional TSV with genome and optional assembly_level/completeness columns for candidate review.")
+    parser.add_argument("--similarity-matrix", type=Path, help="Optional labeled square Sourmash similarity CSV used only for within-subcohort diagnostics.")
     parser.add_argument("--family-map", type=Path, help="Optional PyamilySeq gene-family assignment table or gene_presence_absence.csv.")
     parser.add_argument("--map-gene-column", help="Gene/member column in a long-format family map; inferred by default.")
     parser.add_argument("--map-family-column", help="Family/cluster column in a long-format family map; inferred by default.")
     parser.add_argument("--map-genome-column", help="Optional genome column in a long-format family map; inferred by default.")
     parser.add_argument("--sequence-delimiter", default="|", help="Delimiter used by combined gene IDs such as genome|gene.")
-    parser.add_argument("--reference-genome", help="Genome filename stem to use as orientation/order reference. Defaults to the first genome alphabetically when a family map is supplied.")
+    parser.add_argument("--reference-genome", help="Explicit legacy single-cohort orientation/reference genome. No reference is selected automatically.")
     parser.add_argument("--min-orientation-anchors", type=int, default=5, help="Minimum unique shared families needed to infer contig orientation.")
     parser.add_argument("--min-orientation-tau", type=float, default=0.5,
                         help="Minimum absolute Kendall tau required for orientation inference (range 0 to 1); higher values are more conservative.")
     parser.add_argument("--breakpoint-window-genes", type=int, default=10, help="Maximum reference-gene-rank span for clustering nearby contig-end observations.")
-    parser.add_argument("--max-end-anchor-genes", type=int, default=5, help="Only count a contig endpoint for recurrence if its nearest unique-family anchor is within this many genes of the physical end.")
+    parser.add_argument("--max-end-anchor-genes", type=int, default=5, help="Maximum anchor position from a physical contig end, counting the anchor gene itself (positions 1 through N are eligible); applies to reference-anchor eligibility only, not physical endpoint inventory.")
     parser.add_argument("--max-end-anchor-bp", type=int, default=10000, help="Only count a contig endpoint for recurrence if its nearest unique-family anchor is within this many bp of the physical end.")
     parser.add_argument("--label-by", choices=("auto", "family", "locus_tag", "Name", "gene", "product", "ID"), default="auto", help="Gene label used in tabular output and figures.")
     parser.add_argument("--max-genomes-plotted", type=int, default=50, help="Maximum number of genomes drawn in overview figures; all genomes remain in reports.")
@@ -1520,6 +2357,10 @@ def clear_stale_outputs(outdir: Path) -> None:
         "genome_summary.tsv", "contig_summary.tsv", "contig_order.tsv", "gene_order.tsv",
         "contig_orientation.tsv", "gene_order_metrics_vs_reference.tsv", "family_order_matches.tsv",
         "contig_breakpoints_vs_reference.tsv", "assembly_breakpoint_support.tsv", "run_summary.txt", "run_manifest.json",
+        "contig_end_gene_candidates.tsv", "physical_endpoints.tsv", "replicon_manifest.tsv",
+        "reference_candidates.tsv", "reference_manifest.tsv",
+        "contig_placement_blocks.tsv", "contig_placement_summary.tsv",
+        "placement_reference_sequence_manifest.tsv", "placement_query_sequence_manifest.tsv",
     }
     figures = {
         "contig_size_profiles.png", "contig_size_profiles.svg", "gene_order_tracks.png", "gene_order_tracks.svg",
@@ -1536,6 +2377,9 @@ def clear_stale_outputs(outdir: Path) -> None:
         path = figure_dir / name
         if path.is_file():
             path.unlink()
+    placement_dir = outdir / "placement"
+    if placement_dir.is_dir():
+        shutil.rmtree(placement_dir)
 
 
 def run(args: argparse.Namespace) -> int:
@@ -1553,6 +2397,11 @@ def run(args: argparse.Namespace) -> int:
     genomes.sort(key=lambda g: g.name.casefold())
     run_warnings: list[str] = []
     run_warnings.extend(apply_fasta_lengths(genomes, args.fasta_dir))
+    if args.assembly_report_map and not args.fasta_dir:
+        raise ValueError("--assembly-report-map requires --fasta-dir")
+    replicon_metadata = collect_contig_replicon_metadata(
+        genomes, args.fasta_dir, args.assembly_report_map
+    ) if args.fasta_dir else []
     family_map = load_family_map(args.family_map, args.map_gene_column, args.map_family_column,
                                  args.map_genome_column, args.sequence_delimiter) if args.family_map else None
     mapped_count = assign_families(genomes, family_map, args.sequence_delimiter)
@@ -1566,7 +2415,7 @@ def run(args: argparse.Namespace) -> int:
         )
     reference_genome = args.reference_genome
     orientation_rows: list[dict] = []
-    if family_map and mapped_count:
+    if family_map and mapped_count and args.reference_genome:
         reference_genome, orientation_rows = infer_contig_orientations(
             genomes, reference_genome, args.min_orientation_anchors, args.min_orientation_tau
         )
@@ -1604,9 +2453,26 @@ def run(args: argparse.Namespace) -> int:
     # Fail before clearing prior outputs when the optional plotting dependency is absent.
     if not args.no_plots:
         _require_matplotlib()
+    report_args = (genomes, replicon_metadata, args.outdir, args.fasta_dir,
+                   args.subcohort_map, args.reference_map, args.assembly_metadata,
+                   args.similarity_matrix, args.reference_genome)
+    build_reference_reports(*report_args, write_outputs=False)
     clear_stale_outputs(args.outdir)
+    reference_config = build_reference_reports(*report_args)
+    from .nucleotide_placement import run_nucleotide_placement
+    placement_result = run_nucleotide_placement(
+        genomes, args.fasta_dir, args.outdir, reference_config["assignments"],
+        reference_config["selected_references"],
+        {cohort: reference_config["presets"].get(cohort, args.minimap2_preset)
+         for cohort in reference_config["selected_references"]},
+        replicon_metadata, args.minimap2, args.threads,
+        args.placement_min_aligned_fraction, args.placement_min_mapq,
+        args.placement_min_block_length,
+    )
+    run_warnings.extend(placement_result.get("warnings", []))
     counts = build_reports(genomes, args.outdir, family_map, reference_genome, orientation_rows,
-                           args.breakpoint_window_genes, args.max_end_anchor_genes, args.max_end_anchor_bp)
+                           args.breakpoint_window_genes, args.max_end_anchor_genes, args.max_end_anchor_bp,
+                           replicon_metadata)
     plot_notes: list[str] = []
     plot_failure: RuntimeError | None = None
     if not args.no_plots:
@@ -1646,6 +2512,14 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-genomes-plotted must be at least 1")
     if args.max_labels_per_genome < 0:
         parser.error("--max-labels-per-genome cannot be negative")
+    if args.threads < 1:
+        parser.error("--threads must be at least 1")
+    if not 0 < args.placement_min_aligned_fraction <= 1:
+        parser.error("--placement-min-aligned-fraction must be in (0, 1]")
+    if args.placement_min_mapq < 0:
+        parser.error("--placement-min-mapq cannot be negative")
+    if args.placement_min_block_length < 1:
+        parser.error("--placement-min-block-length must be at least 1")
     try:
         return run(args)
     except (FileNotFoundError, NotADirectoryError, ValueError, OSError, RuntimeError) as exc:

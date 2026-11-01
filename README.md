@@ -78,6 +78,34 @@ PyamilySeq Full \
 Run `PyamilySeq Full --help` or `PyamilySeq Partial --help` for the complete
 option list. `--log` and `--log-dir` are accepted before or after the mode name.
 
+## One-command supplementation workflow
+
+`Supplementation` runs the full analysis on the original genomes, then clusters
+the original representatives with the added genomes and writes the combined
+analysis. Each input set can independently be a directory of combined GFF files,
+a directory of paired GFF/FASTA files, or an extracted FASTA. Results are kept
+under `original/` and `supplemented/` in the output directory.
+
+```bash
+PyamilySeq Supplementation \
+  -original_input_type combined \
+  -original_input_dir original_genomes \
+  -original_name_split_gff .gff \
+  -supplement_input_type combined \
+  -supplement_input_dir added_genomes \
+  -supplement_name_split_gff .gff \
+  -output_dir supplementation_results \
+  -sequence_type AA \
+  -c 0.90 -s 0.80 -T 16 -M 8000
+```
+
+For extracted FASTA inputs, use `-original_input_type fasta
+-original_input_fasta original_genes.fasta` and the corresponding
+`-supplement_input_type fasta -supplement_input_fasta added_genes.fasta`.
+Protein or nucleotide alphabets are detected automatically. New FASTA headers
+must identify their genome using the configured sequence delimiter (by default,
+`genome|gene`).
+
 ## Identifier And Taxon Rules
 
 By default, sequence IDs use `genome|gene`, and the text before the first `|`
@@ -319,6 +347,11 @@ HTML/SVG neighborhood views. Singleton families are included by default; use
 
 Each command provides its full interface with `--help`.
 
+Genome-order and cohort workflows are also available from the main command:
+`PyamilySeq Analyze order ...`, `PyamilySeq Analyze location ...`, and
+`PyamilySeq Analyze cohort ...`. The location workflow reports family
+neighborhoods and writes its own HTML/SVG visual summaries.
+
 `Track-Genome-Order --gff-dir genomes --outdir genome_order --no-plots` writes
 tabular contig and gene-order reports. Add `--family-map` to compare shared
 families and infer contig orientation against a reference genome. Install
@@ -327,6 +360,18 @@ single-copy family anchors and requires both `--min-orientation-anchors` and
 `--min-orientation-tau`; ambiguous reference-contig matches remain unoriented.
 The tool expects unique GFF feature IDs for multipart features and reports
 partial family-map coverage and annotation/FASTA mismatches in `run_summary.txt`.
+
+For reference-definition reports, `--subcohort-map` accepts a TSV with
+`genome` and `subcohort` columns, and `--reference-map` accepts a TSV with
+`subcohort` and `reference_genome` columns. Every genome and sub-cohort must be
+assigned exactly once. Without these maps, all genomes are listed in one
+`default` cohort and no reference is selected. The tool writes
+`reference_candidates.tsv` and `reference_manifest.tsv`; candidate ranks are a
+transparent review order, not a completeness score or an automatic selection.
+Optional `--assembly-metadata` (`genome`, `assembly_level`, and/or
+`completeness`) and `--similarity-matrix` inputs add candidate diagnostics.
+Similarity values never determine sub-cohort boundaries. Supplying an explicit
+reference map does not perform contig placement or endpoint recurrence.
 
 ### Cohort workflow for 100–1,000 genomes
 
@@ -356,14 +401,81 @@ PyamilySeq-Cohort pangenome \
 PyamilySeq-Cohort order \
   --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort \
   --reference-genome MG1655 --no-plots
+
+PyamilySeq-Cohort locations \
+  --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort
 ```
 
-The Sourmash threshold is intentionally explicit and should be selected after
-reviewing the similarity matrix. Similarity groups use connected components,
-so chained links can place genomically distant samples in the same group; the
-edge table is retained to inspect those links. The main pangenome remains global.
+The Sourmash threshold is optional; omit it to build the signature collection
+and similarity matrix before choosing a threshold. The threshold should be selected after
+reviewing the similarity matrix. Groups default to deterministic greedy
+complete-linkage assignment, so every pair in a group meets the threshold; use
+`--grouping-method single_linkage` only when chained links are intended. The
+edge table is retained to inspect these relationships. Similarity groups
+stratify downstream summaries; the main pangenome remains global.
 Order outputs include per-assembly endpoint evidence and a
-`breakpoint_support_by_similarity_group.tsv` summary with group denominators.
+`breakpoint_support_by_similarity_group.tsv` summary with callable-genome
+denominators for each candidate region. `contig_end_gene_candidates.tsv`
+lists genes close to physical contig ends or carrying partial/disruption
+annotation flags; it labels review candidates and does not claim that a gene is
+truncated or lost.
+Pyrodigal calls are ab initio predictions, not curated annotations. For complete
+chromosomes or plasmids, sequence endpoints may represent the chosen origin of
+a closed replicon rather than an assembly break; use draft assemblies and
+sequence-level validation before interpreting recurrent endpoints as hotspots.
+
+For one multi-genome FASTA with BV-BRC/RefSeq-style bracketed sample labels,
+split records by the text before the taxon ID. Assembly metrics can be prepared
+without annotations:
+
+```bash
+PyamilySeq-Cohort prepare \\
+  --combined-fasta BVBRC_genome_sequence.fasta --outdir ecoli_assemblies
+```
+
+To add gene-family and reference-projected analyses, predict CDSs with
+Pyrodigal (install `PyamilySeq[annotation]`), use a local Bakta installation,
+or supply matching per-genome GFF3 files with `--gff-dir`:
+
+```bash
+PyamilySeq-Cohort prepare \\
+  --combined-fasta BVBRC_genome_sequence.fasta \\
+  --annotate-with-pyrodigal --outdir ecoli_cohort
+```
+
+Custom headers can be grouped with `--genome-header-regex`, which must contain
+a named `(?P<genome>...)` capture. The split manifest records the mapping from
+header-derived genome labels to per-genome FASTAs. Contig-size reports can run
+without annotations; reference-projected breakpoint analysis requires matching
+GFF3 annotations and a family map.
+
+After running preparation, Sourmash, pangenome, and order analysis, generate an
+interactive, self-contained dashboard:
+
+```bash
+PyamilySeq Analyze cohort report \
+  --manifest ecoli_cohort/genome_manifest.tsv --outdir ecoli_cohort
+```
+
+The report filters genomes by metadata, similarity group, N50, and sequence
+record count, and can select neighbors above a chosen Jaccard similarity to a
+seed genome. Selected genomes can be downloaded as a TSV, then turned into a
+new managed cohort for independent downstream analysis:
+
+```bash
+PyamilySeq Analyze cohort subset \
+  --manifest ecoli_cohort/genome_manifest.tsv \
+  --genomes-file selected_genomes.tsv --outdir selected_cohort
+```
+
+The subset command creates its own manifest and staging directory, so rerunning
+the pangenome stage on it discovers only the selected genomes. The dashboard's
+family table is a descriptive audit of calls near contig ends; it does not
+estimate false absences or establish that fragmentation caused family-call
+differences. Endpoint analyses require FASTA or explicit GFF sequence lengths;
+records whose length is inferred only from their last annotated feature are
+excluded from endpoint-support counts. Reference-projected assembly ends are
+screening observations, not statistical hotspots or biological breakpoints.
 
 ## Development
 

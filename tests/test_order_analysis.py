@@ -11,6 +11,7 @@ from PyamilySeq.order_analysis import (
     load_family_map,
     load_fasta_lengths,
     parse_gff,
+    build_contig_end_gene_candidates,
 )
 
 
@@ -145,3 +146,64 @@ def test_orientation_tau_threshold_is_configurable():
     q1 = next(row for row in rows if row["genome"] == "query")
     assert q1["orientation"] == "undetermined"
     assert q1["orientation_status"] == "insufficient_or_ambiguous_anchors"
+
+
+def test_contig_end_gene_candidates_report_proximity_without_claiming_truncation():
+    genome = _genome("sample", {"ctg": ["A", "B"]})
+    genome.contigs["ctg"].length = 200
+    genome.contigs["ctg"].length_source = "fasta"
+    genome.genes[0].attributes["partial"] = "true"
+    rows = build_contig_end_gene_candidates([genome], max_end_anchor_genes=1, max_end_anchor_bp=20)
+    assert len(rows) == 2
+    partial = next(row for row in rows if row["gene_id"] == genome.genes[0].feature_id)
+    assert "partial=true" in partial["annotation_flags"]
+    assert "do not prove truncation" in partial["interpretation"]
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+def test_end_candidate_gene_threshold_includes_positions_one_through_five(side):
+    orders = {"ctg": [f"F{i}" for i in range(10)]}
+    genome = _genome("sample", orders)
+    contig = genome.contigs["ctg"]
+    contig.length = 2000
+    contig.length_source = "fasta"
+    rows = build_contig_end_gene_candidates([genome], max_end_anchor_genes=5, max_end_anchor_bp=10000)
+    near_key = "near_left_end" if side == "left" else "near_right_end"
+    rank_key = f"genes_from_{side}_contig_end"
+    positions = {row[rank_key] + 1 for row in rows if row[near_key]}
+    assert positions == {1, 2, 3, 4, 5}
+    assert 6 not in positions
+
+
+def test_fasta_only_contig_generates_two_endpoints_but_is_not_gff_annotated_or_anchorable(tmp_path):
+    from PyamilySeq.order_analysis import build_physical_endpoint_rows
+
+    gff = tmp_path / "g.gff3"
+    gff.write_text("annotated\tRef\tCDS\t1\t4\t.\t+\t0\tID=g1\n"
+                   "gff_only\tRef\tCDS\t1\t3\t.\t+\t0\tID=g2\n")
+    fasta_dir = tmp_path / "fastas"
+    fasta_dir.mkdir()
+    (fasta_dir / "g.fa").write_text(">annotated\nACGT\n>fasta_only\nAACCGG\n")
+    genome = parse_gff(gff)
+    apply_fasta_lengths([genome], fasta_dir)
+    fasta_only = genome.contigs["fasta_only"]
+    assert not fasta_only.has_gff_annotation
+    assert fasta_only.has_fasta_record
+    endpoints = [row for row in build_physical_endpoint_rows([genome]) if row["contig"] == "fasta_only"]
+    assert [(row["endpoint_side"], row["physical_coordinate"]) for row in endpoints] == [("left", 1), ("right", 6)]
+    assert all(not genome.contigs[row["contig"]].has_gff_annotation for row in endpoints)
+    assert not genome.contigs["gff_only"].has_fasta_record
+    assert not [row for row in build_physical_endpoint_rows([genome]) if row["contig"] == "gff_only"]
+
+
+def test_pyrodigal_complete_partial_flag_is_not_a_disruption():
+    genome = _genome("sample", {"ctg": [f"F{i}" for i in range(12)]})
+    genome.contigs["ctg"].length = 2000
+    middle = genome.genes[5]
+    middle.attributes["partial"] = "00"
+    rows = build_contig_end_gene_candidates([genome], max_end_anchor_genes=1, max_end_anchor_bp=20)
+    assert middle.feature_id not in {row["gene_id"] for row in rows}
+    genome.genes[6].attributes["partial"] = "10"
+    rows = build_contig_end_gene_candidates([genome], max_end_anchor_genes=1, max_end_anchor_bp=20)
+    flagged = next(row for row in rows if row["gene_id"] == genome.genes[6].feature_id)
+    assert flagged["annotation_flags"] == "partial=10"

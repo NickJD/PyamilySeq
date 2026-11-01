@@ -1,0 +1,14 @@
+<svg xmlns='http://www.w3.org/2000/svg' role='img' aria-labelledby='title desc' width='100%' height='180' viewBox='0 0 1100 180'>
+<title id='title'>Added-genome gene-family relationships</title><desc id='desc'>Gene counts assigned to families linked to the original pangenome or to supplement-only families.</desc>
+<style>text{font:15px system-ui,sans-serif;fill:#182321}.small{font-size:12px;fill:#51615c}</style>
+<text x='24' y='30' style='font:bold 21px system-ui,sans-serif'>Where the added genes land</text>
+<rect x='24' y='48' width='14' height='14' rx='3' fill='#247a62'/><text x='46' y='61'>Genes in original-linked families</text>
+<rect x='384' y='48' width='14' height='14' rx='3' fill='#c66a32'/><text x='406' y='61'>Genes in supplement-only families</text>
+<text x='24' y='112'>Escherichia_coli_110957_gca_000485615.A…</text>
+<title>Escherichia_coli_110957_gca_000485615.ASM48561v1</title>
+<rect x='345.0' y='94' width='587.0' height='30' rx='3' fill='#247a62'/>
+<text x='638.5' y='114' text-anchor='middle' style='font-size:12px;fill:white'>4,453</text>
+<rect x='932.0' y='94' width='63.0' height='30' rx='3' fill='#c66a32'/>
+<text x='963.5' y='114' text-anchor='middle' style='font-size:12px;fill:white'>478</text>
+<text x='345' y='143' class='small'>Total genes: 4,931 · linked: 4,453 · supplement-only: 478</text>
+</svg>

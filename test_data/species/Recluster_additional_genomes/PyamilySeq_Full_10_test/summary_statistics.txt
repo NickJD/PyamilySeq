@@ -1,0 +1,30 @@
+Analysis mode: Species
+Number of genomes: 10
+Number of taxa: 10
+Input sequences: 50327
+Sequences assigned exactly once: 50327
+Final gene families: 11733
+Families retained after filters: 11733
+
+RECONCILIATION PROVENANCE (technical classification)
+The following labels describe how final families were formed during clustering and reconciliation. They do not indicate whether a family is biologically core or accessory.
+Original-only family: 11733
+Original family + supplement: 0
+Merged original families: 0
+Supplement-only family: 0
+This is a standalone baseline pangenome analysis; no supplemental genomes have been reconciled into this output.
+
+RECONCILIATION PROVENANCE BY FINAL FAMILY PREVALENCE
+Prevalence denominator: 10 genomes. Each family appears in exactly one mutually exclusive bin.
+Reconciliation process	>=99%	95-<99%	15-<95%	<15%	Total
+Original-only family	2991	0	3277	5465	11733
+Original family + supplement	0	0	0	0	0
+Merged original families	0	0	0	0	0
+Supplement-only family	0	0	0	0	0
+ALL_FAMILIES	2991	0	3277	5465	11733
+
+Cumulative prevalence across all family stages
+These are cumulative counts, unlike the mutually exclusive bins above.
+Families present in >= 99% of genomes (at least 10/10): 2991
+Families present in >= 95% of genomes (at least 10/10): 2991
+Families present in >= 15% of genomes (at least 2/10): 6268

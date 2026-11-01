@@ -58,15 +58,20 @@ def test_prepare_decompresses_gff_and_rejects_unpaired_genomes(tmp_path):
         prepare_cohort(fasta_dir, gff_dir, tmp_path / "other")
 
 
-def test_similarity_groups_are_connected_components_and_keep_threshold_edges(tmp_path):
+def test_similarity_groups_avoid_single_linkage_chaining_and_keep_threshold_edges(tmp_path):
     matrix = tmp_path / "matrix.csv"
     matrix.write_text(",a,b,c,d\na,1,0.8,0.1,0.1\nb,0.8,1,0.7,0.1\nc,0.1,0.7,1,0.2\nd,0.1,0.1,0.2,1\n")
     groups, edges = tmp_path / "groups.tsv", tmp_path / "edges.tsv"
     assignments = _write_similarity_groups(matrix, tmp_path / "labels.csv", groups, edges, 0.65)
-    assert assignments["a"] == assignments["b"] == assignments["c"]
+    assert assignments["a"] == assignments["b"]
+    assert assignments["c"] != assignments["a"]
     assert assignments["d"] != assignments["a"]
-    assert "connected_components_single_linkage" in groups.read_text()
+    assert "greedy_complete_linkage" in groups.read_text()
     assert len(edges.read_text().splitlines()) == 3
+
+    single_link = _write_similarity_groups(matrix, tmp_path / "labels.csv", groups, edges, 0.65,
+                                            grouping_method="single_linkage")
+    assert single_link["a"] == single_link["b"] == single_link["c"]
 
 
 def test_similarity_matrix_reads_sourmash_header_plus_numeric_rows(tmp_path):
@@ -129,10 +134,11 @@ def test_stratify_breakpoints_reports_group_denominators(tmp_path):
     order_dir.mkdir()
     (order_dir / "contig_breakpoints_vs_reference.tsv").write_text(
         "genome\tcontig\treference_contig\tleft_boundary_reference_gene_order\tleft_boundary_support_eligible\t"
-        "right_boundary_reference_gene_order\tright_boundary_support_eligible\n"
-        "a\tca\tr1\t10\tTrue\t90\tFalse\n"
-        "b\tcb\tr1\t12\tTrue\t91\tFalse\n"
-        "c\tcc\tr1\t80\tFalse\t92\tFalse\n"
+        "right_boundary_reference_gene_order\tright_boundary_support_eligible\treference_order_min_anchor\t"
+        "reference_order_max_anchor\n"
+        "a\tca\tr1\t10\tTrue\t90\tFalse\t10\t90\n"
+        "b\tcb\tr1\t12\tTrue\t91\tFalse\t12\t91\n"
+        "c\tcc\tr1\t80\tFalse\t92\tFalse\t80\t92\n"
     )
     similarity_dir = tmp_path / "similarity"
     similarity_dir.mkdir()
@@ -148,7 +154,8 @@ def test_stratify_breakpoints_reports_group_denominators(tmp_path):
     similarity = next(row for row in rows if row["stratification"] == "similarity_group")
     assert similarity["n_distinct_genomes"] == "2"
     assert similarity["n_genomes_in_group"] == "3"
-    assert similarity["fraction_group_with_breakpoint"] == "0.666667"
+    assert similarity["n_genomes_callable_for_region"] == "2"
+    assert similarity["fraction_callable_with_contig_end"] == "1.000000"
     phylogroup_a = next(row for row in rows if row["stratification"] == "metadata:phylogroup" and row["stratum"] == "A")
     assert phylogroup_a["n_distinct_genomes"] == "2"
     assert phylogroup_a["n_genomes_in_group"] == "2"

@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "PyamilySeq"
-version = "1.5.0"
+version = "1.6.0"
 authors = [
     {name = "Nicholas Dimonaco", email = "nicholas@dimonaco.co.uk"}
 ]
 description = "Build and analyze gene families and pangenomes from CD-HIT, DIAMOND, BLAST, or MMseqs2 clustering results."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = {file = "LICENSE"}
 keywords = ["Pangenomics", "Sequence Clustering", "Gene Families"]
 classifiers = [
@@ -29,6 +29,9 @@ analysis = [
     "numpy>=1.26",
     "pandas>=2.1",
     "seaborn>=0.13",
+]
+annotation = [
+    "pyrodigal>=3.7",
 ]
 dev = [
     "pytest>=8",

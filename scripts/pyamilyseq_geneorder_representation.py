@@ -230,7 +230,7 @@ def main():
     with open(args.output, 'w', newline='', encoding='utf-8') as output, open(
         report_path, 'w', newline='', encoding='utf-8'
     ) as report:
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter='\t', lineterminator='\n')
         report_writer = csv.writer(report, delimiter='\t', lineterminator='\n')
         writer.writerow(['Genome', 'Group', 'Ordered_Families'])
         report_writer.writerow([

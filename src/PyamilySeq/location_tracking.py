@@ -306,6 +306,12 @@ def parse_gff(path, gene_types=('CDS', 'gene'), feature_layer='auto', genome=Non
     opener = gzip.open if str(path).lower().endswith('.gz') else open
     with opener(path, 'rt', encoding='utf-8') as fh:
         for line_number, line in enumerate(fh, start=1):
+            if line.startswith('# Sequence Data:'):
+                sequence_data = re.search(r'\bseqlen=(\d+);seqhdr="([^"]+)"', line)
+                if sequence_data:
+                    sequence_regions[sequence_data.group(2)] = int(sequence_data.group(1))
+                    raw_contigs[sequence_data.group(2)]
+                continue
             if line.startswith('##sequence-region'):
                 parts = line.split()
                 if len(parts) >= 4:
@@ -710,11 +716,12 @@ def re_split_members(s):
 def normalise_member_to_gid(member):
     """Try to extract a plausible gene id from a cluster member id.
 
-    Supports forms like 'genome|gene', 'genome:gene', or raw 'gene'.
-    Returns the gene portion (after last pipe or colon) by default.
+    Supports forms like 'genome|gene', 'genome|contig|gene', 'genome:gene',
+    or raw 'gene'. The genome prefix is removed once; embedded delimiters in
+    contig and sequence IDs are retained for exact annotation matching.
     """
     if '|' in member:
-        return member.split('|')[-1]
+        return member.split('|', 1)[1]
     if re.match(r'^[^:]+:\d+-\d+:[+\-.?]$', member):
         return member
     if ':' in member and member.count(':') == 1:
@@ -829,7 +836,10 @@ def _lookup_member_feature(member, id_to_feature, canonical_index, allow_canonic
         if genome:
             qualified = genome + '|' + variant
             if qualified not in keys_to_try:
-                keys_to_try.insert(0, qualified)
+                # Keep the full member ID and full contig-qualified ID ahead
+                # of shortened aliases such as genome|_1, which may be
+                # ambiguous when each contig numbers genes independently.
+                keys_to_try.append(qualified)
 
     for key in keys_to_try:
         if key not in id_to_feature:

@@ -38,8 +38,77 @@ def _category_colour(category):
     return PALETTE['default']
 
 
-def _nice_label(label):
-    return str(label).replace('_', ' ')
+def _category_prevalence_label(raw_group, groups, mode):
+    if mode == "Species":
+        positive = sorted(
+            {int(value) for value in groups if str(value).isdigit() and int(value) > 0},
+            reverse=True,
+        )
+        value = int(raw_group)
+        if value == 0:
+            return f"<{min(positive)}% prevalence" if positive else "below configured thresholds"
+        higher = [item for item in positive if item > value]
+        if not higher:
+            return f">={value}% prevalence"
+        return f"{value}-<{min(higher)}% prevalence"
+
+    numeric = sorted({int(value) for value in groups if str(value).isdigit()})
+    if str(raw_group) == ">":
+        return f">{numeric[-1]} genera" if numeric else "above configured genus bins"
+    value = int(raw_group)
+    lower_values = [item for item in numeric if item < value]
+    lower = max(lower_values) + 1 if lower_values else 1
+    return f"<={value} genera" if lower == 1 else f"{lower}-{value} genera"
+
+
+def _nice_label(label, category_keys=None, mode="Species"):
+    """Display readable provenance and prevalence without changing stored categories."""
+    value = str(label)
+    stage_labels = {
+        "First": "Original-only family",
+        "extended": "Original family + supplement",
+        "combined": "Merged original families",
+        "only_Second": "Supplement-only family",
+    }
+
+    for internal, display in stage_labels.items():
+        prefix = internal + "_"
+        if not value.startswith(prefix):
+            continue
+
+        remainder = value[len(prefix):]
+        prevalence_type = "core" if mode == "Species" else "genera"
+        expected_prefix = prevalence_type + "_"
+        if not remainder.startswith(expected_prefix):
+            return f"{display} — {remainder.replace('_', ' ')}"
+
+        raw_group = remainder[len(expected_prefix):]
+        groups = []
+        for key in category_keys or ():
+            key = str(key)
+            if key.startswith(prefix + expected_prefix):
+                raw = key[len(prefix + expected_prefix):]
+                if raw.isdigit():
+                    groups.append(int(raw))
+        if mode == "Genus" and any(
+            str(key).endswith("_genera_>")
+            for key in (category_keys or ())
+        ):
+            groups.append(">")
+
+        if not groups:
+            groups = (
+                [99, 95, 15, 0]
+                if mode == "Species"
+                else [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, ">"]
+            )
+
+        prevalence_label = _category_prevalence_label(
+            raw_group, groups, mode
+        )
+        return f"{display} — {prevalence_label}"
+
+    return value.replace("_", " ")
 
 
 def _compact_label(label, max_chars=18):
@@ -89,7 +158,7 @@ def _render_category_svg(category_counts, output_path, mode_label, taxa_label):
             y = top + idx * row_h
             bar_w = 0 if max_count == 0 else int(chart_w * (count / max_count))
             colour = _category_colour(category)
-            svg.append(f'<text class="label" x="28" y="{y + 20}">{_escape(_nice_label(category))}</text>')
+            svg.append(f'<text class="label" x="28" y="{y + 20}">{_escape(_nice_label(category, category_counts.keys(), mode_label))}</text>')
             svg.append(f'<rect x="{left}" y="{y + 6}" width="{bar_w}" height="20" rx="3" fill="{colour}"/>')
             svg.append(f'<text class="axis" x="{left + bar_w + 8}" y="{y + 21}">{count}</text>')
 
@@ -531,7 +600,8 @@ body{font-family:Arial,Helvetica,sans-serif;margin:24px;color:#1f2933;background
 label{font-size:12px;color:#52606d;display:grid;gap:4px}input,select{font:inherit;padding:6px;border:1px solid #9aa5b1;border-radius:4px}
 #viewport{margin-top:16px;background:#fff;border:1px solid #d9e2ec;overflow:auto;max-height:75vh}canvas{display:block}.status{margin:10px 0;color:#52606d}
 </style></head><body><main><h1>Pangenome Explorer</h1>
-<div class="controls"><label>Family search<input id="search" type="search"></label><label>Stage<select id="stage"><option value="">All</option><option>First</option><option>extended</option><option>combined</option><option>only_Second</option></select></label><label>Minimum prevalence<input id="minimum" type="number" min="0" value="0"></label><label>Rows<input id="limit" type="number" min="1" max="2000" value="300"></label></div>
+<div class="controls"><label>Family search<input id="search" type="search"></label><label>Reconciliation provenance
+<select id="stage">   <option value="">All stages</option>    <option value="First">Original-only family</option>    <option value="extended">Original family + supplement</option>    <option value="combined">Merged original families</option>    <option value="only_Second">Supplement-only family</option></select></label><label>Minimum prevalence<input id="minimum" type="number" min="0" value="0"></label><label>Rows<input id="limit" type="number" min="1" max="2000" value="300"></label></div>
 <p class="status" id="status"></p><div id="viewport"><canvas id="matrix"></canvas></div>
 <script>const DATA=__DATA__;const canvas=document.getElementById('matrix'),ctx=canvas.getContext('2d');
 const controls=['search','stage','minimum','limit'].map(id=>document.getElementById(id));controls.forEach(c=>c.addEventListener('input',draw));

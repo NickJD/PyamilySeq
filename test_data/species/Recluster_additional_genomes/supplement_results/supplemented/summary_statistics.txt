@@ -1,0 +1,82 @@
+Analysis mode: Species
+Number of genomes: 10
+Number of taxa: 10
+Input sequences: 50327
+Sequences assigned exactly once: 50327
+Final gene families: 11733
+Families retained after filters: 11733
+
+RECONCILIATION PROVENANCE (technical classification)
+The following labels describe how final families were formed during clustering and reconciliation. They do not indicate whether a family is biologically core or accessory.
+Original-only family: 6803
+Original family + supplement: 4449
+Merged original families: 1
+Supplement-only family: 480
+
+RECONCILIATION PROVENANCE BY FINAL FAMILY PREVALENCE
+Prevalence denominator: 10 genomes. Each family appears in exactly one mutually exclusive bin.
+Reconciliation process	>=99%	95-<99%	15-<95%	<15%	Total
+Original-only family	0	0	1818	4985	6803
+Original family + supplement	2990	0	1459	0	4449
+Merged original families	1	0	0	0	1
+Supplement-only family	0	0	0	480	480
+ALL_FAMILIES	2991	0	3277	5465	11733
+
+Cumulative prevalence across all family stages
+These are cumulative counts, unlike the mutually exclusive bins above.
+Families present in >= 99% of genomes (at least 10/10): 2991
+Families present in >= 95% of genomes (at least 10/10): 2991
+Families present in >= 15% of genomes (at least 2/10): 6268
+
+SUPPLEMENTATION IMPACT: TRACKING THE ORIGINAL PANGENOME
+======================================================
+BASELINE PANGENOME (before any supplemental genomes were added)
+Original genomes: 9
+Original gene families: 11,256
+Original core definition: >= 99% prevalence (at least 9/9 genomes)
+Original core families: 3,036
+
+SUPPLEMENTED PANGENOME
+Total genomes after supplementation: 10
+Additional genomes: 1
+Additional genome IDs: Escherichia_coli_110957_gca_000485615.ASM48561v1
+Final gene families: 11,733
+Final core families at the same >= 99% threshold: 2,991
+Net change in the total number of core families: -45 (-1.48% relative to the original core count)
+
+FATE OF THE ORIGINAL CORE FAMILY SET
+Original core family lineages tracked: 3,036
+Mapped to exactly one final family: 3,036
+Split across multiple final families: 0
+Not mapped to a final family: 0
+Distinct final families containing original core lineages (all prevalence levels): 3,036
+Original core lineages whose final family is in >=99%: 2,990
+Original core lineages whose final family is in 95-<99%: 0
+Original core lineages whose final family is in 15-<95%: 46
+
+BIOLOGICAL OUTCOMES OF THE ORIGINAL CORE LINEAGES
+Retained core: 2,990
+Core downgraded: 46
+Split across final families: 0
+Unmapped: 0
+Prevalence unavailable: 0
+Total original core lineages classified: 3,036
+
+ADDED-GENOME PRESENCE IN FINAL FAMILIES DESCENDED FROM ORIGINAL CORE
+Counts below represent original core family lineages, not genome counts or unique final-family counts. A lineage is counted once according to the presence of the added genome(s) in its mapped final family.
+Number of added genomes in this run: 1
+Original core lineages whose final family contains all added genomes: 2,990
+Original core lineages whose final family contains some but not all added genomes: 0
+Original core lineages whose final family contains none of the added genomes: 46
+Presence unavailable: 0
+Presence not assessed (split or unmapped lineages): 0
+Total original core lineages accounted for: 3,036/3,036
+
+ORIGIN OF THE FINAL SUPPLEMENTED CORE SET
+Final core families containing at least one original-core lineage: 2,990
+Newly core families derived exclusively from original non-core lineages: 1
+Final core families with unresolved original source provenance: 0
+
+INTERPRETATION
+The lineage counts refer to original core families, tracked by stable source-family IDs. Several original families can merge into one final family; those cases are counted once per original lineage in the lineage sections, while final-core origin counts represent distinct final families. A split or unmapped lineage is not assigned an inferred final prevalence outcome.
+Added-genome presence categories count original core lineages, not genomes or unique final families. Presence is read from gene_presence_absence.csv when the required added-genome columns are available. Reconciliation provenance labels describe how families were formed; they are not biological core/accessory classifications.
