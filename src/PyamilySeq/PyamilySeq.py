@@ -31,6 +31,20 @@ def _normalise_clustering_format(value):
     raise argparse.ArgumentTypeError(f"invalid clustering format: '{value}'. valid: CD-HIT, MMseqs, BLAST")
 
 
+
+
+def _gene_annotation_sidecar_for_fasta(fasta_path):
+    """Return a neighbouring gene-annotation sidecar, preferring gzip."""
+    if not fasta_path:
+        return None
+    directory = os.path.dirname(os.path.abspath(fasta_path))
+    candidates = (
+        os.path.join(directory, "gene_annotations.tsv.gz"),
+        os.path.join(directory, "gene_annotations.tsv"),
+    )
+    return next((path for path in candidates if os.path.isfile(path)), None)
+
+
 def run_cd_hit(options, input_file, clustering_output, clustering_mode):
     logger = logging.getLogger("PyamilySeq.PyamilySeq")
     cdhit_command = [
@@ -47,6 +61,11 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
         '-sf', "1"
     ]
     logger.debug("CD-HIT command: %s", " ".join(cdhit_command))
+    run_mode = "fast" if getattr(options, "fast_mode", 1) == 0 else "accurate"
+    logger.info(
+        "Starting %s in %s mode (threads=%s; memory=%s MB; input=%s).",
+        clustering_mode.upper(), run_mode, options.threads, options.mem, input_file,
+    )
     try:
         if options.verbose:
             ret = subprocess.run(cdhit_command)
@@ -61,26 +80,38 @@ def run_cd_hit(options, input_file, clustering_output, clustering_mode):
 
 
 def _run_supplementation(options, output_path, groups_to_use, logger):
-    """Run source and supplemented pangenomes as one two-stage workflow."""
+    """Run the original and supplemented pangenomes with explicit input naming."""
     os.makedirs(output_path, exist_ok=True)
     original_dir = os.path.join(output_path, "original")
     supplemented_dir = os.path.join(output_path, "supplemented")
     os.makedirs(original_dir, exist_ok=True)
     os.makedirs(supplemented_dir, exist_ok=True)
 
-    def extract_input(input_type, input_dir, input_fasta, gff_suffix, fasta_suffix, target):
+    def extract_input(prefix, input_type, input_dir, input_fasta, gff_suffix, fasta_suffix, target):
+        supplied_annotations = getattr(options, f"{prefix}_gene_annotations", None)
         if input_type == "fasta":
             if not input_fasta or not os.path.isfile(input_fasta):
                 raise ValueError(f"Input FASTA does not exist: {input_fasta}")
-            return input_fasta
-        dna_path = os.path.join(target, "genes_dna.fasta")
+            if supplied_annotations is None:
+                supplied_annotations = _gene_annotation_sidecar_for_fasta(input_fasta)
+            if supplied_annotations and not os.path.isfile(supplied_annotations):
+                raise ValueError(f"Gene-annotation file does not exist: {supplied_annotations}")
+            return input_fasta, supplied_annotations
+
+        dna_name = "original_genes_dna.fasta" if prefix == "original" else "supplemental_genes_dna.fasta"
+        dna_path = os.path.join(target, dna_name)
+        annotation_path = os.path.join(target, "gene_annotations.tsv.gz")
         if input_type == "combined":
-            read_combined_files(input_dir, gff_suffix, options.gene_ident, dna_path, False, False)
+            read_combined_files(
+                input_dir, gff_suffix, options.gene_ident, dna_path, False, False,
+                progress_logger=logger, annotation_out=annotation_path,
+            )
         else:
             read_separate_files(
-                input_dir, gff_suffix, fasta_suffix, options.gene_ident, dna_path, False, False
+                input_dir, gff_suffix, fasta_suffix, options.gene_ident,
+                dna_path, False, False, annotation_out=annotation_path,
             )
-        return dna_path
+        return dna_path, annotation_path
 
     def clustering_input(fasta_path, target, prefix):
         is_dna = detect_sequence_type(fasta_path)
@@ -94,16 +125,18 @@ def _run_supplementation(options, output_path, groups_to_use, logger):
             return aa_path, "cd-hit", True
         return fasta_path, "cd-hit", False
 
-    original_fasta = extract_input(
-        options.original_input_type, options.original_input_dir, options.original_input_fasta,
-        options.original_name_split_gff, options.original_name_split_fasta, original_dir,
+    original_fasta, original_annotations = extract_input(
+        "original", options.original_input_type, options.original_input_dir,
+        options.original_input_fasta, options.original_name_split_gff,
+        options.original_name_split_fasta, original_dir,
     )
-    supplement_fasta = extract_input(
-        options.supplement_input_type, options.supplement_input_dir, options.supplement_input_fasta,
-        options.supplement_name_split_gff, options.supplement_name_split_fasta, supplemented_dir,
+    supplement_fasta, supplement_annotations = extract_input(
+        "supplement", options.supplement_input_type, options.supplement_input_dir,
+        options.supplement_input_fasta, options.supplement_name_split_gff,
+        options.supplement_name_split_fasta, supplemented_dir,
     )
     original_cluster_input, clustering_mode, original_is_dna = clustering_input(
-        original_fasta, original_dir, "original_sequences"
+        original_fasta, original_dir, "original_clustering_sequences"
     )
     if options.sequence_type == "AA" and not original_is_dna and detect_sequence_type(supplement_fasta):
         # The incremental preparer translates DNA supplements when the source
@@ -118,7 +151,11 @@ def _run_supplementation(options, output_path, groups_to_use, logger):
     if not os.path.isfile(original_clusters):
         raise RuntimeError(f"CD-HIT did not create the original cluster file: {original_clusters}")
 
-    def analysis_options(run_mode, clusters, fasta, target, reclustered=None):
+    def annotation_list(*paths):
+        return [os.path.abspath(path) for path in paths if path]
+
+    def analysis_options(run_mode, clusters, fasta, target, reclustered=None,
+                         sequence_db_out=None, gene_annotation_files=None):
         return SimpleNamespace(
             run_mode=run_mode, cluster_format="CD-HIT", sequence_type=options.sequence_type,
             reclustered=reclustered, sequence_tag=options.sequence_tag,
@@ -128,7 +165,7 @@ def _run_supplementation(options, output_path, groups_to_use, logger):
             threads=options.threads, mem=options.mem,
             sequence_buffer_cap_mb=options.sequence_buffer_cap_mb, tmp_dir=options.tmp_dir,
             align_core=options.align_core, align_aa=options.align_aa, fasta=fasta,
-            sequence_db=None, verbose=options.verbose,
+            sequence_db=None, sequence_db_out=sequence_db_out, verbose=options.verbose,
             single_copy_only=options.single_copy_only, single_copy_tolerance=options.single_copy_tolerance,
             gene_group_table=options.gene_group_table, core_group_table=options.core_group_table,
             visualise=options.visualise, visualise_heatmap_limit=options.visualise_heatmap_limit,
@@ -139,10 +176,15 @@ def _run_supplementation(options, output_path, groups_to_use, logger):
             blast_min_query_coverage=options.blast_min_query_coverage,
             blast_min_subject_coverage=options.blast_min_subject_coverage,
             blast_columns=options.blast_columns, added_genomes=None,
+            gene_annotation_files=annotation_list(*(gene_annotation_files or [])),
         )
 
+    original_options = analysis_options(
+        "Full", original_clusters, original_fasta, original_dir,
+        gene_annotation_files=[original_annotations],
+    )
     logger.info("Analysing original genome set")
-    species_cluster(analysis_options("Full", original_clusters, original_fasta, original_dir))
+    species_cluster(original_options)
 
     prepared = prepare_incremental_inputs(
         cluster_file=original_clusters,
@@ -157,35 +199,47 @@ def _run_supplementation(options, output_path, groups_to_use, logger):
         recluster_input = prepared["representatives_dna_fasta"]
         recluster_mode = "cd-hit-est" if options.sequence_type == "DNA" else "cd-hit"
         if options.sequence_type == "AA":
-            recluster_input = os.path.join(supplemented_dir, "incremental_representatives_aa.fasta")
+            recluster_input = os.path.join(supplemented_dir, "reclustering_input_aa.fasta")
             translate_dna_to_aa(prepared["representatives_dna_fasta"], recluster_input)
     else:
         recluster_input = prepared["representatives_fasta"]
         recluster_mode = "cd-hit"
+
     new_prefix = os.path.join(supplemented_dir, "clustering_CD-HIT_supplemented")
     run_cd_hit(options, recluster_input, new_prefix, recluster_mode)
     new_clusters = new_prefix + ".clstr"
     if not os.path.isfile(new_clusters):
         raise RuntimeError(f"CD-HIT did not create the supplemented cluster file: {new_clusters}")
+
     options.added_genomes = ",".join(prepared["new_genomes"])
+    combined_annotations = [path for path in (original_annotations, supplement_annotations) if path]
     final_options = analysis_options(
         "Partial", original_clusters, prepared["combined_fasta"], supplemented_dir,
         reclustered=new_clusters,
+        sequence_db_out=getattr(options, "sequence_db_out", None),
+        gene_annotation_files=combined_annotations,
     )
     final_options.added_genomes = options.added_genomes
-    # Preserve the independently analysed original pangenome so the final
-    # workflow can trace every original core family into the supplemented set.
+    final_options.supplemental_sequence_ids = prepared["new_gene_ids"]
     final_options.baseline_output_dir = original_dir
+
+    logger.info(
+        "Tracking %s supplementary sequence IDs for provenance",
+        len(final_options.supplemental_sequence_ids),
+    )
     logger.info("Analysing original representatives plus supplemental genomes")
     species_cluster(final_options)
-    logger.info("Supplementation complete: original outputs in %s; supplemented outputs in %s", original_dir, supplemented_dir)
+    logger.info(
+        "Supplementation complete: original outputs in %s; supplemented outputs in %s",
+        original_dir, supplemented_dir,
+    )
 
 
 def main():
     # Initial console-only logger so welcome and parser.description are logged before argparse outputs.
     early_logger = configure_logger("PyamilySeq.PyamilySeq", enable_file=False, log_dir=None, verbose=False)
     # Use LoggingArgumentParser so usage/errors are emitted via logger
-    parser = LoggingArgumentParser(logger_name="PyamilySeq.PyamilySeq")#, description="PyamilySeq entrypoint")
+    parser = LoggingArgumentParser(logger_name="PyamilySeq.PyamilySeq")  # , description="PyamilySeq entrypoint")
 
     # Add subparsers for Full, Partial, Incremental, and Supplementation modes.
     subparsers = parser.add_subparsers(
@@ -216,6 +270,8 @@ def main():
                              help="Clustering mode: 'DNA' or 'AA'.")
     full_parser.add_argument("-gene_ident", default="CDS", required=False,
                              help="Gene identifiers to extract sequences (e.g., 'CDS, tRNA').")
+    full_parser.add_argument("-gene_annotations", dest="gene_annotation_file", default=None,
+                             help="Optional gene-annotation TSV for prepared FASTA input. GFF input generates annotations automatically.")
     full_parser.add_argument("-c", type=str, dest="pident", default="0.90", required=False,
                              help="Sequence identity threshold for clustering (default: 0.90) - CD-HIT parameter '-c'.")
     full_parser.add_argument("-s", type=str, dest="len_diff", default="0.80", required=False,
@@ -224,10 +280,10 @@ def main():
     full_parser.add_argument("-fast_mode", action="store_true",
                              help="Enable fast mode for CD-HIT (not recommended) - CD-HIT parameter '-g'.")
 
-
     # Partial Mode Subparser
     partial_parser = subparsers.add_parser("Partial", help="Partial mode: PyamilySeq to process pre-clustered data.")
-    partial_parser.add_argument("-clustering_format", type=_normalise_clustering_format, choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
+    partial_parser.add_argument("-clustering_format", type=_normalise_clustering_format,
+                                choices=['CD-HIT', 'MMseqs', 'BLAST'], required=True,
                                 help="Clustering format used: CD-HIT, MMseqs2, or BLAST. ")
     partial_parser.add_argument("-cluster_file", required=True,
                                 help="Cluster file containing pre-clustered groups from CD-HIT, MMseqs, BLAST etc.")
@@ -236,7 +292,7 @@ def main():
                                      "Not required if -sequence_db is given.")
     partial_parser.add_argument("-sequence_db", required=False,
                                 help="Checkpoint: path to a pyamilyseq_sequences_*.sqlite3 file already built "
-                                     "by a previous run (e.g. from SequenceStore.from_fasta). If given, the "
+                                     "created by a previous run using --sequence-db-out. If given, the "
                                      "original FASTA is NOT re-parsed - the existing database is reused directly.")
     partial_parser.add_argument("-output_dir", required=True,
                                 help="Directory for all output files.")
@@ -244,6 +300,8 @@ def main():
                                 help="Clustering output file from a second round of clustering.")
     partial_parser.add_argument("-seq_tag", default="StORF", dest="sequence_tag", required=False,
                                 help="Legacy compatibility label; reclustering provenance is inferred from first-round membership.")
+    partial_parser.add_argument("-gene_annotations", dest="gene_annotation_file", default=None,
+                                help="Optional TSV sidecar generated during GFF extraction, with sequence_id, gene_name and annotation columns.")
 
     # Incremental mode: reuse an existing CD-HIT partition and recluster only
     # the original representatives plus genes from the new genomes.
@@ -252,35 +310,39 @@ def main():
         help="Incremental mode: recluster prior CD-HIT representatives with newly added genes, then reconcile all genes."
     )
     incremental_parser.add_argument("-clustering_format", choices=['CD-HIT'], default='CD-HIT',
-                                   help="The original cluster file must be native CD-HIT .clstr format.")
+                                    help="The original cluster file must be native CD-HIT .clstr format.")
     incremental_parser.add_argument("-cluster_file", required=True,
-                                   help="Original full CD-HIT .clstr file from the existing pangenome run.")
+                                    help="Original full CD-HIT .clstr file from the existing pangenome run.")
     incremental_parser.add_argument("-original_fasta", required=True,
-                                   help="Full nucleotide or protein FASTA used for the original clustering; its sequence alphabet is auto-detected and it must contain every old gene.")
+                                    help="Full nucleotide or protein FASTA used for the original clustering; its sequence alphabet is auto-detected and it must contain every old gene.")
     incremental_parser.add_argument("-output_dir", required=True,
-                                   help="Directory for incremental intermediate files and final PyamilySeq outputs.")
+                                    help="Directory for incremental intermediate files and final PyamilySeq outputs.")
     incremental_parser.add_argument("-new_input_type", choices=['combined', 'separate', 'fasta'], required=True,
-                                   help="New gene input: combined GFF+FASTA, paired GFF/FASTA files, or a prepared nucleotide genes FASTA.")
+                                    help="New gene input: combined GFF+FASTA, paired GFF/FASTA files, or a prepared nucleotide genes FASTA.")
     incremental_parser.add_argument("-new_input_dir", required=False,
-                                   help="Directory containing only the new genomes' GFF/FASTA inputs.")
+                                    help="Directory containing only the new genomes' GFF/FASTA inputs.")
     incremental_parser.add_argument("-new_input_fasta", required=False,
-                                   help="Prepared nucleotide genes FASTA for only the new genomes (IDs must be genome|gene).")
+                                    help="Prepared nucleotide genes FASTA for only the new genomes (IDs must be genome|gene).")
     incremental_parser.add_argument("-name_split_gff", required=False,
-                                   help="Filename suffix for new GFF files, e.g. '_combined.gff3'.")
+                                    help="Filename suffix for new GFF files, e.g. '_combined.gff3'.")
     incremental_parser.add_argument("-name_split_fasta", required=False,
-                                   help="Optional FASTA filename suffix for paired inputs in separate mode.")
+                                    help="Optional FASTA filename suffix for paired inputs in separate mode.")
     incremental_parser.add_argument("-sequence_type", choices=['AA', 'DNA'], default='AA',
-                                   help="Clustering sequence type used by the original run; keep it and -c/-s consistent with that run.")
+                                    help="Clustering sequence type used by the original run; keep it and -c/-s consistent with that run.")
     incremental_parser.add_argument("-gene_ident", default='CDS',
-                                   help="GFF feature type(s) to extract from new genomes, e.g. 'CDS' or 'CDS,tRNA'.")
+                                    help="GFF feature type(s) to extract from new genomes, e.g. 'CDS' or 'CDS,tRNA'.")
     incremental_parser.add_argument("-c", type=str, dest="pident", default='0.90',
-                                   help="CD-HIT identity threshold; use the same value as the original run (default: 0.90).")
+                                    help="CD-HIT identity threshold; use the same value as the original run (default: 0.90).")
     incremental_parser.add_argument("-s", type=str, dest="len_diff", default='0.80',
-                                   help="CD-HIT length threshold; use the same value as the original run (default: 0.80).")
+                                    help="CD-HIT length threshold; use the same value as the original run (default: 0.80).")
     incremental_parser.add_argument("-fast_mode", action='store_true',
-                                   help="Enable CD-HIT fast mode (not recommended; match the original run settings).")
+                                    help="Enable CD-HIT fast mode (not recommended; match the original run settings).")
     incremental_parser.add_argument("-seq_tag", default='StORF', dest='sequence_tag', required=False,
-                                   help="Legacy compatibility label; family provenance is inferred from source membership.")
+                                    help="Legacy compatibility label; family provenance is inferred from source membership.")
+    incremental_parser.add_argument("-gene_annotations", dest="gene_annotation_file", default=None,
+                                    help="Optional annotation TSV/TSV.GZ for the original FASTA; auto-detected beside original_fasta as gene_annotations.tsv.gz or gene_annotations.tsv when present.")
+    incremental_parser.add_argument("-new_gene_annotations", dest="new_gene_annotation_file", default=None,
+                                    help="Optional annotation TSV when the new input is a prepared FASTA. GFF inputs generate it automatically.")
 
     supplementation_parser = subparsers.add_parser(
         "Supplementation",
@@ -308,6 +370,11 @@ def main():
         supplementation_parser.add_argument(
             f"-{prefix}_name_split_fasta", help=f"Optional FASTA suffix for paired {description} inputs."
         )
+        supplementation_parser.add_argument(
+            f"-{prefix}_gene_annotations",
+            help=f"Optional existing gene-annotation TSV when {description} input is a prepared FASTA. "
+                 "GFF inputs generate this metadata automatically.",
+        )
     supplementation_parser.add_argument("-sequence_type", choices=["AA", "DNA"], default="AA")
     supplementation_parser.add_argument("-gene_ident", default="CDS")
     supplementation_parser.add_argument("-c", type=str, dest="pident", default="0.90")
@@ -334,13 +401,21 @@ def main():
         subparser.add_argument("-no_gpa", action="store_false", dest="gene_presence_absence_out",
                                help="Skip creation of gene_presence_absence.csv.")
         subparser.add_argument("-M", type=int, default=4000, dest="mem", required=False,
-                                 help="Memory budget in MB. Used for FASTA/cluster processing; in Full, Incremental, and Supplementation modes it is passed to CD-HIT.")
+                               help="Memory budget in MB. Used for FASTA/cluster processing; in Full, Incremental, and Supplementation modes it is passed to CD-HIT.")
         subparser.add_argument("--sequence-buffer-cap-mb", type=int, default=256, dest="sequence_buffer_cap_mb",
                                help="Maximum chunk size in MB for the FASTA-backed sequence store used during loading.")
         subparser.add_argument("--tmp-dir", dest="tmp_dir", default=None,
                                help="Directory for temporary files such as chunked sequence stores and MAFFT scratch files.")
+        subparser.add_argument(
+            "--sequence-db-out",
+            dest="sequence_db_out",
+            default=None,
+            help=("Create and retain a validated SQLite sequence-store checkpoint at this path. "
+                  "In Supplementation mode this retains the final combined database only. "
+                  "The path must not already exist."),
+        )
         subparser.add_argument("-T", type=int, default=8, dest="threads", required=False,
-                                 help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
+                               help="Number of threads for clustering/alignment - CD-HIT parameter '-T' | MAFFT parameter '--thread'.")
         # Options for selecting single-copy families
         subparser.add_argument("--single_copy_only", action="store_true", dest="single_copy_only",
                                help="If set, only report gene families that are strictly single-copy across genomes.")
@@ -390,7 +465,8 @@ def main():
         subparser.add_argument("-verbose", action="store_true", default=argparse.SUPPRESS,
                                help="Print verbose output.")
 
-    analysis_parser = subparsers.add_parser("Analyze", help="Run genome-order, gene-neighborhood, or cohort-scale analyses.")
+    analysis_parser = subparsers.add_parser("Analyze",
+                                            help="Run genome-order, gene-neighborhood, or cohort-scale analyses.")
     analysis_parser.add_argument("analysis_tool", choices=("order", "location", "cohort"),
                                  help="Analysis workflow to run.")
     analysis_parser.add_argument("analysis_args", nargs=argparse.REMAINDER,
@@ -427,16 +503,15 @@ def main():
                 from cohort_analysis import main as analysis_main
         return analysis_main(options.analysis_args)
 
-
-
     # Setup logger once we know output paths/options
     # after we resolve output_path / options.output_dir:
-    resolved_log_dir = options.log_dir if getattr(options, "log_dir", None) else (os.path.abspath(options.output_dir) if getattr(options, "output_dir", None) else os.getcwd())
-    logger = configure_logger("PyamilySeq.PyamilySeq", enable_file=getattr(options, "log", False), log_dir=resolved_log_dir, verbose=options.verbose)
+    resolved_log_dir = options.log_dir if getattr(options, "log_dir", None) else (
+        os.path.abspath(options.output_dir) if getattr(options, "output_dir", None) else os.getcwd())
+    logger = configure_logger("PyamilySeq.PyamilySeq", enable_file=getattr(options, "log", False),
+                              log_dir=resolved_log_dir, verbose=options.verbose)
     logger.info("Running PyamilySeq %s in %s mode", PyamilySeq_Version, getattr(options, "run_mode", "N/A"))
     if options.verbose:
         logger.debug("Options: %s", vars(options))
-
 
     if options.run_mode == 'Full':
         options.clustering_format = 'CD-HIT'
@@ -512,7 +587,6 @@ def main():
             if options.write_groups is None:
                 sys.exit('Must provide "-write_groups" to output gene groups before alignment "-align" can be done.')
 
-
     if getattr(options, "clustering_format", "").upper() == "CD-HIT":
         clust_affix = '.clstr'
     if getattr(options, "clustering_format", "").upper() == "TSV":
@@ -532,13 +606,13 @@ def main():
     if options.run_mode in ('Full', 'Incremental', 'Supplementation'):
         clustering_mode = 'cd-hit-est' if options.sequence_type == 'DNA' else 'cd-hit'
         if is_tool_installed(clustering_mode):
-            logger.info("%s is installed. Proceeding with clustering.", clustering_mode)
+            logger.info("%s executable found.", clustering_mode)
             if options.fast_mode is True:
                 options.fast_mode = 0
-                logger.info("Running CD-HIT in fast mode.")
+                logger.info("CD-HIT configured to run in fast mode.")
             else:
                 options.fast_mode = 1
-                logger.info("Running CD-HIT in accurate mode.")
+                logger.info("CD-HIT configured to run in accurate mode.")
         else:
             logger.error("%s is not installed. Please install CD-HIT to proceed.", clustering_mode)
             sys.exit(f"{clustering_mode} is not installed. Please install CD-HIT to proceed.")
@@ -566,22 +640,46 @@ def main():
         options.output_dir = fix_path(options.output_dir)
     if getattr(options, 'taxon_map', None):
         options.taxon_map = fix_path(options.taxon_map)
+    for annotation_attribute in (
+        "gene_annotation_file", "new_gene_annotation_file",
+        "original_gene_annotations", "supplement_gene_annotations",
+    ):
+        annotation_path = getattr(options, annotation_attribute, None)
+        if annotation_path:
+            setattr(options, annotation_attribute, fix_path(annotation_path))
     if getattr(options, 'sequence_buffer_cap_mb', None) is not None and options.sequence_buffer_cap_mb <= 0:
         sys.exit("--sequence-buffer-cap-mb must be greater than 0")
     if getattr(options, 'tmp_dir', None):
         options.tmp_dir = fix_path(options.tmp_dir)
         os.makedirs(options.tmp_dir, exist_ok=True)
 
+    if getattr(options, 'sequence_db_out', None):
+        options.sequence_db_out = os.path.abspath(fix_path(options.sequence_db_out))
+        db_parent = os.path.dirname(options.sequence_db_out) or os.getcwd()
+        os.makedirs(db_parent, exist_ok=True)
+        if any(os.path.exists(candidate) for candidate in (
+            options.sequence_db_out,
+            options.sequence_db_out + "-wal",
+            options.sequence_db_out + "-shm",
+            options.sequence_db_out + "-journal",
+        )):
+            sys.exit(
+                f"Sequence database output already exists: {options.sequence_db_out}. "
+                "Choose a new path; existing checkpoints are never overwritten."
+            )
+
     if options.run_mode == 'Partial':
         if getattr(options, 'sequence_db', None):
             options.sequence_db = fix_path(options.sequence_db)
+            if getattr(options, 'sequence_db_out', None):
+                sys.exit("Partial mode cannot combine -sequence_db with --sequence-db-out; reuse the existing database or build a new one from -original_fasta.")
         elif not getattr(options, 'original_fasta', None):
             sys.exit("Partial mode requires either -original_fasta or -sequence_db.")
         if getattr(options, 'original_fasta', None):
             options.original_fasta = fix_path(options.original_fasta)
 
     output_path = os.path.abspath(options.output_dir)
-    combined_out_file = os.path.join(output_path, "combined_sequences_dna.fasta")
+    combined_out_file = os.path.join(output_path, "input_genes_dna.fasta")
     clustering_output = os.path.join(output_path, 'clustering_' + options.clustering_format)
 
     if options.group_mode == 'Species':
@@ -593,7 +691,6 @@ def main():
         if options.align_core:
             sys.exit("-a align_core not a valid option in Genus mode.")
 
-
     if options.run_mode == 'Full':
         if getattr(options, "clustering_format", "").upper() != "CD-HIT":
             sys.exit('Only CD-HIT clustering works in Full Mode')
@@ -602,17 +699,30 @@ def main():
             os.makedirs(output_path)
         if options.sequence_type == 'AA':
             clustering_mode = 'cd-hit'
-            file_to_cluster = combined_out_file.replace('_dna.fasta','_aa.fasta')
+            file_to_cluster = combined_out_file.replace('_dna.fasta', '_aa.fasta')
             translate = True
         elif options.sequence_type == 'DNA':
             clustering_mode = 'cd-hit-est'
             translate = False
             file_to_cluster = combined_out_file
+        gene_annotation_files = []
         if options.input_type == 'separate':
-            read_separate_files(options.input_dir, options.name_split_gff, options.name_split_fasta, options.gene_ident, combined_out_file, translate, False)
+            annotation_path = os.path.join(output_path, "gene_annotations.tsv.gz")
+            read_separate_files(
+                options.input_dir, options.name_split_gff, options.name_split_fasta,
+                options.gene_ident, combined_out_file, translate, False,
+                annotation_out=annotation_path,
+            )
+            gene_annotation_files = [annotation_path]
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'combined':
-            read_combined_files(options.input_dir, options.name_split_gff, options.gene_ident, combined_out_file, translate, False)
+            annotation_path = os.path.join(output_path, "gene_annotations.tsv.gz")
+            read_combined_files(
+                options.input_dir, options.name_split_gff, options.gene_ident,
+                combined_out_file, translate, False,
+                progress_logger=logger, annotation_out=annotation_path,
+            )
+            gene_annotation_files = [annotation_path]
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
         elif options.input_type == 'fasta':
             combined_out_file = options.input_fasta
@@ -620,13 +730,19 @@ def main():
             is_dna = detect_sequence_type(options.input_fasta)
             # If the sequence type is AA and the input is DNA, translate the DNA to AA
             if options.sequence_type == 'AA' and is_dna:
-                translated_fasta = os.path.join(output_path, os.path.splitext(os.path.basename(options.input_fasta))[0] + '_aa.fasta')
+                translated_fasta = os.path.join(output_path, os.path.splitext(os.path.basename(options.input_fasta))[
+                    0] + '_aa.fasta')
                 translate_dna_to_aa(options.input_fasta, translated_fasta)
                 file_to_cluster = translated_fasta
             else:
                 file_to_cluster = options.input_fasta
+            if options.input_type == 'fasta':
+                annotation_path = getattr(options, "gene_annotation_file", None)
+                if annotation_path is None:
+                    annotation_path = _gene_annotation_sidecar_for_fasta(options.input_fasta)
+                if annotation_path:
+                    gene_annotation_files = [annotation_path]
             run_cd_hit(options, file_to_cluster, clustering_output, clustering_mode)
-
 
         class clustering_options:
             def __init__(self):
@@ -649,6 +765,8 @@ def main():
                 self.align_core = options.align_core
                 self.align_aa = options.align_aa
                 self.fasta = combined_out_file
+                self.sequence_db = None
+                self.sequence_db_out = getattr(options, "sequence_db_out", None)
                 self.verbose = options.verbose
                 # single-copy reporting options
                 self.single_copy_only = options.single_copy_only
@@ -668,6 +786,7 @@ def main():
                 self.blast_min_subject_coverage = options.blast_min_subject_coverage
                 self.blast_columns = options.blast_columns
                 self.added_genomes = options.added_genomes
+                self.gene_annotation_files = gene_annotation_files
 
         clustering_options = clustering_options()
 
@@ -678,21 +797,35 @@ def main():
 
         # Extract only the newly added gene sequences. Existing genes are copied
         # from the authoritative full DNA FASTA, not re-extracted from old GFFs.
-        new_genes_dna = os.path.join(output_path, "new_genes_dna.fasta")
+        new_genes_dna = os.path.join(output_path, "supplemental_genes_dna.fasta")
+        new_annotation_path = None
         if options.new_input_type == 'combined':
+            new_annotation_path = os.path.join(output_path, "supplemental_gene_annotations.tsv.gz")
             read_combined_files(
                 options.new_input_dir, options.name_split_gff, options.gene_ident,
-                new_genes_dna, False, False,
+                new_genes_dna, False, False, annotation_out=new_annotation_path,
             )
             new_genes_source = new_genes_dna
         elif options.new_input_type == 'separate':
+            new_annotation_path = os.path.join(output_path, "supplemental_gene_annotations.tsv.gz")
             read_separate_files(
                 options.new_input_dir, options.name_split_gff, options.name_split_fasta,
                 options.gene_ident, new_genes_dna, False, False,
+                annotation_out=new_annotation_path,
             )
             new_genes_source = new_genes_dna
         else:
             new_genes_source = options.new_input_fasta
+            new_annotation_path = getattr(options, "new_gene_annotation_file", None)
+            if new_annotation_path is None:
+                new_annotation_path = _gene_annotation_sidecar_for_fasta(new_genes_source)
+
+        original_annotation_path = getattr(options, "gene_annotation_file", None)
+        if original_annotation_path is None:
+            original_annotation_path = _gene_annotation_sidecar_for_fasta(options.original_fasta)
+        gene_annotation_files = [
+            path for path in (original_annotation_path, new_annotation_path) if path
+        ]
 
         try:
             prepared = prepare_incremental_inputs(
@@ -713,7 +846,7 @@ def main():
         # nucleotide genes, so the representative input is ready for CD-HIT.
         if options.sequence_type == 'AA':
             if prepared["original_is_dna"]:
-                file_to_cluster = os.path.join(output_path, "incremental_representatives_aa.fasta")
+                file_to_cluster = os.path.join(output_path, "reclustering_input_aa.fasta")
                 translate_dna_to_aa(prepared["representatives_dna_fasta"], file_to_cluster)
             else:
                 file_to_cluster = prepared["representatives_fasta"]
@@ -734,6 +867,7 @@ def main():
         # This is what restores original non-representative genes to their families.
         if options.added_genomes is None:
             options.added_genomes = ",".join(prepared["new_genomes"])
+
         class clustering_options:
             def __init__(self):
                 self.run_mode = 'Partial'
@@ -756,6 +890,7 @@ def main():
                 self.align_aa = options.align_aa
                 self.fasta = prepared["combined_fasta"]
                 self.sequence_db = None
+                self.sequence_db_out = getattr(options, "sequence_db_out", None)
                 self.verbose = options.verbose
                 self.single_copy_only = options.single_copy_only
                 self.single_copy_tolerance = options.single_copy_tolerance
@@ -774,6 +909,7 @@ def main():
                 self.blast_min_subject_coverage = options.blast_min_subject_coverage
                 self.blast_columns = options.blast_columns
                 self.added_genomes = options.added_genomes
+                self.gene_annotation_files = gene_annotation_files
 
         clustering_options = clustering_options()
         logger.info(
@@ -787,6 +923,16 @@ def main():
             sys.exit("Supplementation mode currently requires CD-HIT.")
         try:
             _run_supplementation(options, output_path, groups_to_use, logger)
+        except UnicodeDecodeError as error:
+            logger.exception(
+                "Supplementation encountered a text decoding error. "
+                "Encoding=%s, invalid bytes=%s, position=%s.",
+                error.encoding,
+                error.object[error.start:error.end].hex(" "),
+                error.start,
+            )
+            sys.exit(2)
+
         except (ValueError, IncrementalInputError) as error:
             logger.error("Supplementation could not continue: %s", error)
             sys.exit(2)
@@ -798,6 +944,7 @@ def main():
     elif options.run_mode == 'Partial':
         if not os.path.exists(output_path):
             os.makedirs(output_path)
+
         class clustering_options:
             def __init__(self):
                 self.run_mode = options.run_mode
@@ -820,6 +967,7 @@ def main():
                 self.align_aa = options.align_aa
                 self.fasta = options.original_fasta
                 self.sequence_db = getattr(options, 'sequence_db', None)
+                self.sequence_db_out = getattr(options, "sequence_db_out", None)
                 self.verbose = options.verbose
                 # single-copy reporting options
                 self.single_copy_only = options.single_copy_only
@@ -839,9 +987,12 @@ def main():
                 self.blast_min_subject_coverage = options.blast_min_subject_coverage
                 self.blast_columns = options.blast_columns
                 self.added_genomes = options.added_genomes
+                annotation_path = getattr(options, "gene_annotation_file", None)
+                if annotation_path is None and getattr(options, "original_fasta", None):
+                    annotation_path = _gene_annotation_sidecar_for_fasta(options.original_fasta)
+                self.gene_annotation_files = [annotation_path] if annotation_path else []
 
         clustering_options = clustering_options()
-
 
     if options.group_mode == 'Species':
         try:
@@ -880,12 +1031,11 @@ def main():
 
     # Save arguments to a text file
     from datetime import datetime
-    with open(output_path+"/PyamilySeq_params.txt", "w") as outfile:
+    with open(output_path + "/PyamilySeq_params.txt", "w") as outfile:
         outfile.write(f"Timestamp: {datetime.now().isoformat()}\n")
         for arg, value in vars(options).items():
             outfile.write(f"{arg}: {value}\n")
     logger.info("Saved parameters to %s", os.path.join(output_path, "PyamilySeq_params.txt"))
-
 
 
 if __name__ == "__main__":

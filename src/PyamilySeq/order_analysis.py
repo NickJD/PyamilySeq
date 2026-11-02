@@ -1503,11 +1503,14 @@ def build_reference_reports(genomes: list[Genome], replicon_metadata: list[dict]
             if conflicts:
                 raise ValueError(f"Reference genome {reference!r} has conflicting replicon metadata for: {', '.join(conflicts)}")
             selected[cohort] = g.name
-                cohort_preset = row.get("minimap2_preset", "")
-                if cohort_preset:
-                    if cohort_preset not in {"asm5", "asm10", "asm20"}:
-                        raise ValueError(f"Unsupported minimap2_preset {cohort_preset!r} for subcohort {cohort!r}; choose asm5, asm10, or asm20")
-                    selected_presets[cohort] = cohort_preset
+            cohort_preset = row.get("minimap2_preset", "")
+            if cohort_preset:
+                if cohort_preset not in {"asm5", "asm10", "asm20"}:
+                    raise ValueError(
+                        f"Unsupported minimap2_preset {cohort_preset!r} for subcohort {cohort!r}; "
+                        "choose asm5, asm10, or asm20"
+                    )
+                selected_presets[cohort] = cohort_preset
         missing = sorted(set(cohort_names) - set(selected), key=str.casefold)
         if missing:
             raise ValueError("Reference map is missing sub-cohort assignments: " + ", ".join(missing))

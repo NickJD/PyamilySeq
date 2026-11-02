@@ -1,5 +1,12 @@
 # PyamilySeq
 
+[![PyPI Version](https://shields.io)](https://pypi.org/project/PyamilySeq/)
+[![PyPI Downloads](https://shields.io)](https://pypi.org/project/PyamilySeq/)
+[![Bioconda Version](https://shields.io)](https://anaconda.org/bioconda/pyamilyseq)
+[![GitHub License](https://shields.io)](https://github.com)
+[![GitHub Stars](https://shields.io)](https://github.com/NickJD/PyamilySeq)
+
+
 PyamilySeq builds gene-family and pangenome summaries from CD-HIT, MMseqs2,
 BLAST, or DIAMOND clustering results. It supports species- and genus-level
 prevalence groups, staged reclustering, sequence export and alignment, visual
@@ -11,7 +18,7 @@ you use it in published work, please cite the
 
 ## Core Guarantees
 
-PyamilySeq 1.5 uses one canonical family ledger for every downstream output.
+PyamilySeq uses one canonical family ledger for every downstream output.
 
 ## Features
 - **End-to-End**: PyamilySeq can take a directory of GFF+FASTA files, run CD-HIT for clustering and process the results.
@@ -32,7 +39,7 @@ silently dropped because they do not appear in a cluster file.
 
 ## Installation
 
-PyamilySeq requires Python 3.10 or newer.
+PyamilySeq requires Python 3.12 or newer.
 
 ```bash
 python -m pip install PyamilySeq

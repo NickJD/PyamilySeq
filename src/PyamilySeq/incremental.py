@@ -226,7 +226,7 @@ def prepare_incremental_inputs(
         f"{len(representatives):,}", f"{original_cluster_count:,}",
     )
 
-    normalised_new_fasta = os.path.join(output_dir, "incremental_new_genes_dna.fasta")
+    normalised_new_fasta = os.path.join(output_dir, "supplemental_new_genes_dna.fasta")
     new_ids, new_genomes, new_count = _normalise_new_fasta(
         new_genes_fasta,
         normalised_new_fasta,
@@ -234,7 +234,7 @@ def prepare_incremental_inputs(
         generated_ids_use_pipe=generated_ids_use_pipe,
     )
     if translate_new_genes:
-        translated_new_fasta = os.path.join(output_dir, "incremental_new_genes_aa.fasta")
+        translated_new_fasta = os.path.join(output_dir, "supplemental_new_genes_aa.fasta")
         with open(translated_new_fasta, "w", encoding="utf-8") as out:
             for identifier, sequence in _iter_fasta_records(normalised_new_fasta):
                 _write_fasta_record(out, identifier, translate_frame(sequence))
@@ -247,8 +247,8 @@ def prepare_incremental_inputs(
         )
 
     alphabet = "dna" if original_is_dna else "aa"
-    combined_path = os.path.join(output_dir, f"incremental_combined_sequences_{alphabet}.fasta")
-    reps_path = os.path.join(output_dir, f"incremental_representatives_{alphabet}.fasta")
+    combined_path = os.path.join(output_dir, f"supplemented_full_sequences_{alphabet}.fasta")
+    reps_path = os.path.join(output_dir, f"reclustering_input_{alphabet}.fasta")
     protected_inputs = {os.path.realpath(cluster_file), os.path.realpath(original_fasta),
                         os.path.realpath(new_genes_fasta)}
     for output_path in (combined_path, reps_path, normalised_new_fasta):
@@ -324,4 +324,5 @@ def prepare_incremental_inputs(
         "new_gene_count": new_count,
         "new_genomes": new_genomes,
         "original_is_dna": original_is_dna,
+        "new_gene_ids": new_ids,
     }

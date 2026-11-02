@@ -10,6 +10,18 @@ import math
 import logging
 import argparse
 import gzip
+import time
+import secrets
+import csv
+import io
+from urllib.parse import unquote
+from contextlib import contextmanager
+
+# Strict IUPAC DNA alphabet.
+# Lowercase characters are accepted by converting to uppercase for validation.
+DNA_IUPAC_BASES = frozenset(
+    "ACGTRYSWKMBDHVN"
+)
 
 logger = logging.getLogger("PyamilySeq")  # Use the shared top-level PyamilySeq logger so all utils logs propagate to the same handlers
 
@@ -91,8 +103,372 @@ def translate_frame(sequence):
 
 def _open_text(path, mode='rt'):
     opener = gzip.open if str(path).lower().endswith('.gz') else open
-    return opener(path, mode)
+    return opener(
+        path,
+        mode,
+        encoding="utf-8",
+        errors="strict",
+    )
 
+@contextmanager
+def _atomic_text_outputs(final_paths):
+    """Write UTF-8 outputs to temporary files, then atomically replace targets.
+
+    A target ending in ``.gz`` is gzip-compressed while streaming, avoiding a
+    second full-size uncompressed annotation sidecar on disk. Temporary files
+    are created beside each destination so ``os.replace`` stays on one filesystem.
+    """
+    handles = {}
+    raw_handles = {}
+    temporary_paths = {}
+    committed = set()
+
+    try:
+        for final_path in final_paths:
+            if final_path is None:
+                if None in handles:
+                    raise ValueError("Only one null output handle is supported.")
+                handle = open(os.devnull, "w", encoding="utf-8", errors="strict", newline="\n")
+                handles[None] = handle
+                raw_handles[None] = handle
+                continue
+
+            final_path = os.fspath(final_path)
+            if final_path in handles:
+                raise ValueError(f"Duplicate output path supplied: {final_path}")
+
+            destination_dir = os.path.dirname(os.path.abspath(final_path))
+            prefix = f".{os.path.basename(final_path)}."
+            for _attempt in range(100):
+                temporary_path = os.path.join(
+                    destination_dir, prefix + secrets.token_hex(8) + ".tmp"
+                )
+                try:
+                    fd = os.open(
+                        temporary_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666
+                    )
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise FileExistsError(
+                    f"Could not create a unique temporary output beside {final_path}"
+                )
+
+            temporary_paths[final_path] = temporary_path
+            if str(final_path).lower().endswith(".gz"):
+                raw_handle = os.fdopen(fd, "wb")
+                gzip_handle = gzip.GzipFile(fileobj=raw_handle, mode="wb", mtime=0)
+                text_handle = io.TextIOWrapper(
+                    gzip_handle, encoding="utf-8", errors="strict", newline="\n"
+                )
+                handles[final_path] = text_handle
+                raw_handles[final_path] = raw_handle
+            else:
+                handle = os.fdopen(
+                    fd, "w", encoding="utf-8", errors="strict", newline="\n"
+                )
+                handles[final_path] = handle
+                raw_handles[final_path] = handle
+
+        yield handles
+
+        # Flush and finalise compression streams before syncing their underlying
+        # file descriptors. GzipFile writes its footer when closed.
+        for final_path, handle in handles.items():
+            if final_path is None:
+                handle.flush()
+                handle.close()
+                continue
+            handle.flush()
+            if handle is not raw_handles[final_path]:
+                handle.close()
+            raw_handle = raw_handles[final_path]
+            raw_handle.flush()
+            os.fsync(raw_handle.fileno())
+            if not raw_handle.closed:
+                raw_handle.close()
+
+        for final_path, temporary_path in temporary_paths.items():
+            os.replace(temporary_path, final_path)
+            committed.add(final_path)
+
+    finally:
+        for handle in handles.values():
+            if not handle.closed:
+                handle.close()
+        for final_path, handle in raw_handles.items():
+            if handle not in handles.values() and not handle.closed:
+                handle.close()
+        for final_path, temporary_path in temporary_paths.items():
+            if final_path not in committed and os.path.exists(temporary_path):
+                try:
+                    os.unlink(temporary_path)
+                except OSError:
+                    logger.warning(
+                        "Could not remove incomplete temporary output: %s", temporary_path
+                    )
+
+
+def _sorted_input_files(input_dir, suffix, *, gzip_fallback=False):
+    """Discover files in a deterministic, basename-sorted order."""
+    pattern = os.path.join(os.fspath(input_dir), "*" + str(suffix))
+    files = [item for item in glob.glob(pattern) if os.path.isfile(item)]
+
+    if not files and gzip_fallback and not str(suffix).lower().endswith(".gz"):
+        compressed_pattern = pattern + ".gz"
+        files = [
+            item for item in glob.glob(compressed_pattern)
+            if os.path.isfile(item)
+        ]
+
+    return sorted(files, key=lambda item: os.path.basename(item))
+
+
+def _iter_fasta_records(fasta_path):
+    """Yield ``(full_header, sequence)`` records with basic FASTA validation."""
+    current_header = None
+    current_id = None
+    sequence_chunks = []
+    seen_ids = set()
+    record_count = 0
+
+    with _open_text(fasta_path, "rt") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            if line.startswith(">"):
+                if current_header is not None:
+                    sequence = "".join(sequence_chunks)
+                    if not sequence:
+                        raise ValueError(
+                            f"Empty FASTA sequence for {current_id!r} in "
+                            f"{fasta_path} before line {line_number}."
+                        )
+                    yield current_header, sequence
+                    record_count += 1
+
+                header_text = line[1:].strip()
+                if not header_text:
+                    raise ValueError(
+                        f"Empty FASTA header at line {line_number} in {fasta_path}."
+                    )
+                current_id = header_text.split(None, 1)[0]
+                if current_id in seen_ids:
+                    raise ValueError(
+                        f"Duplicate FASTA identifier {current_id!r} at line "
+                        f"{line_number} in {fasta_path}."
+                    )
+                seen_ids.add(current_id)
+                current_header = ">" + header_text
+                sequence_chunks = []
+            else:
+                if current_header is None:
+                    raise ValueError(
+                        f"Sequence data before the first FASTA header at line "
+                        f"{line_number} in {fasta_path}."
+                    )
+                sequence_chunks.append("".join(line.split()))
+
+    if current_header is not None:
+        sequence = "".join(sequence_chunks)
+        if not sequence:
+            raise ValueError(
+                f"Empty FASTA sequence for {current_id!r} at end of {fasta_path}."
+            )
+        yield current_header, sequence
+        record_count += 1
+
+    if record_count == 0:
+        raise ValueError(f"No FASTA records found in {fasta_path}.")
+
+
+def _read_fasta_sequences_by_id(fasta_path):
+    """Read a per-genome FASTA into an insertion-ordered contig dictionary."""
+    sequences = {}
+    for header, sequence in _iter_fasta_records(fasta_path):
+        sequence_id = header[1:].split(None, 1)[0]
+        sequences[sequence_id] = sequence
+    return sequences
+
+
+def _extract_gff_feature_sequence(
+    contig_sequences,
+    *,
+    contig,
+    start,
+    end,
+    strand,
+    context,
+    circular_contigs=None,
+):
+    """Extract and validate one 1-based inclusive GFF feature.
+
+    GFF3 permits an origin-spanning feature on a circular landmark to have an
+    end coordinate greater than the underlying sequence length. Such
+    coordinates are virtual coordinates: the sequence is extracted from the
+    end of the contig and continued from its beginning. This exception is
+    enabled only when the GFF explicitly marks the contig ``Is_circular=true``.
+    """
+    if contig not in contig_sequences:
+        raise ValueError(
+            f"GFF feature references contig {contig!r}, which is absent from "
+            f"the associated FASTA. {context}"
+        )
+
+    if start < 1 or end < start:
+        raise ValueError(
+            f"Invalid GFF coordinates {start}-{end}; expected 1 <= start <= end. "
+            f"{context}"
+        )
+
+    contig_sequence = contig_sequences[contig]
+    contig_length = len(contig_sequence)
+    if contig_length == 0:
+        raise ValueError(f"Contig {contig!r} has an empty FASTA sequence. {context}")
+
+    feature_length = end - start + 1
+    is_circular = circular_contigs is not None and contig in circular_contigs
+    coordinates_exceed_sequence = start > contig_length or end > contig_length
+
+    if coordinates_exceed_sequence and not is_circular:
+        raise ValueError(
+            f"GFF feature coordinates {start}-{end} exceed the length of linear "
+            f"contig {contig!r} ({contig_length:,} bp). Origin-spanning coordinates "
+            f"are accepted only when the GFF landmark explicitly declares "
+            f"Is_circular=true. {context}"
+        )
+
+    if coordinates_exceed_sequence and is_circular:
+        if feature_length > contig_length:
+            raise ValueError(
+                f"Circular GFF feature spans {feature_length:,} bp, longer than "
+                f"contig {contig!r} ({contig_length:,} bp); extraction would require "
+                f"more than one traversal of the circular sequence. {context}"
+            )
+        # Convert the virtual 1-based coordinate to a zero-based position on
+        # the circular sequence, then concatenate the tail and head as needed.
+        start_offset = (start - 1) % contig_length
+        stop_offset = start_offset + feature_length
+        if stop_offset <= contig_length:
+            sequence = contig_sequence[start_offset:stop_offset]
+        else:
+            sequence = (
+                contig_sequence[start_offset:]
+                + contig_sequence[:stop_offset - contig_length]
+            )
+    else:
+        sequence = contig_sequence[start - 1:end]
+
+    if len(sequence) != feature_length:
+        raise ValueError(
+            f"Extracted sequence length ({len(sequence):,}) does not match GFF "
+            f"coordinate length ({feature_length:,}). {context}"
+        )
+
+    if strand == "-":
+        sequence = reverse_complement(sequence)
+    elif strand != "+":
+        raise ValueError(
+            f"Unsupported CDS strand {strand!r}; expected '+' or '-'. {context}"
+        )
+
+    return validate_nucleotide_sequence(
+        sequence,
+        context=context,
+        start=start,
+        end=end,
+        strand=strand,
+    )
+
+
+def validate_nucleotide_sequence(
+    sequence,
+    *,
+    context,
+    start=None,
+    end=None,
+    strand=None,
+):
+    """
+    Validate an extracted DNA sequence against the IUPAC DNA alphabet.
+
+    Parameters
+    ----------
+    sequence : str
+        Extracted nucleotide sequence.
+    context : str
+        Descriptive source information, e.g. genome, gene, GFF file.
+    start, end : int, optional
+        Original 1-based inclusive GFF feature coordinates.
+    strand : str, optional
+        Feature strand ('+' or '-').
+
+    Returns
+    -------
+    str
+        Original sequence, unchanged.
+
+    Raises
+    ------
+    ValueError
+        If any character is outside the accepted DNA alphabet.
+    """
+
+    if not sequence:
+        raise ValueError(f"Empty nucleotide sequence encountered: {context}")
+
+    # Fast path: set construction and upper-casing are implemented in C. Avoid
+    # a Python-level per-base loop for the many millions of valid CDS records.
+    invalid_symbols = set(sequence.upper()).difference(DNA_IUPAC_BASES)
+    if not invalid_symbols:
+        return sequence
+
+    invalid = []
+    for position, base in enumerate(sequence, start=1):
+        if base.upper() not in DNA_IUPAC_BASES:
+            genomic_position = None
+            if start is not None and end is not None:
+                if strand == "+":
+                    genomic_position = start + position - 1
+                elif strand == "-":
+                    genomic_position = end - position + 1
+            invalid.append((position, base, genomic_position))
+
+    if invalid:
+
+        examples = []
+
+        for position, base, genomic_position in invalid[:10]:
+
+            detail = (
+                f"{base!r} (U+{ord(base):04X}) "
+                f"at CDS position {position}"
+            )
+
+            if genomic_position is not None:
+                detail += (
+                    f", genomic coordinate {genomic_position}"
+                )
+
+            examples.append(detail)
+
+        details = "; ".join(examples)
+
+        raise ValueError(
+            "\n"
+            "STRICT NUCLEOTIDE VALIDATION FAILED\n"
+            f"Source: {context}\n"
+            f"Sequence length: {len(sequence):,} bp\n"
+            f"Invalid character count: {len(invalid):,}\n"
+            f"Invalid characters: {details}\n"
+            "Accepted DNA alphabet: ACGTRYSWKMBDHVN\n"
+            "No sequences were automatically modified."
+        )
+
+    return sequence
 
 def normalise_gene_identifiers(gene_ident):
     if gene_ident is None:
@@ -126,27 +502,111 @@ def _extract_gff_identifier(attributes):
     raise ValueError(f"GFF feature has no supported identifier attribute: {attributes.strip()}")
 
 
-def translate_dna_to_aa(dna_fasta, aa_fasta):
-    def translate_dna_sequence(dna_seq):
-        return translate_frame(dna_seq)
+def _parse_gff_attributes(attributes):
+    """Parse GFF3/GTF-like attributes and URL-decode their values."""
+    parsed = {}
+    for token in (part.strip() for part in str(attributes).strip().split(';') if part.strip()):
+        if '=' in token:
+            key, value = token.split('=', 1)
+        elif ' ' in token:
+            key, value = token.split(None, 1)
+            value = value.strip().strip('"')
+        else:
+            continue
+        key = unquote(key.strip())
+        value = unquote(value.strip().strip('"'))
+        if key in parsed and value:
+            parsed[key] = parsed[key] + ',' + value
+        else:
+            parsed[key] = value
+    return parsed
 
-    with _open_text(dna_fasta, 'rt') as infile, open(aa_fasta, 'w') as outfile:
-        dna_seq = ""
-        header = ""
-        for line in infile:
-            if line.startswith('>'):
-                if dna_seq:
-                    aa_seq = translate_dna_sequence(dna_seq)
-                    wrapped_aa_seq = wrap_sequence(aa_seq, 60)
-                    outfile.write(f"{header}\n{wrapped_aa_seq}\n")
-                header = line.strip()
-                dna_seq = ""
-            else:
-                dna_seq += line.strip()
-        if dna_seq:
-            aa_seq = translate_dna_sequence(dna_seq)
-            wrapped_aa_seq = wrap_sequence(aa_seq, 60)
-            outfile.write(f"{header}\n{wrapped_aa_seq}\n")
+
+def _gff_declares_circular(attributes):
+    """Return True when a GFF landmark explicitly declares ``Is_circular=true``.
+
+    This lightweight parser is intentionally cheaper than decoding all GFF
+    attributes for every feature in a multi-million-CDS input.
+    """
+    for token in str(attributes).split(";"):
+        key, separator, value = token.partition("=")
+        if separator and key.strip().casefold() == "is_circular":
+            return value.strip().strip('"').casefold() == "true"
+    return False
+
+
+def _gff_gene_metadata(attributes):
+    """Return (non-unique gene name, annotation) without inferring missing values.
+
+    ``gene`` is the conventional Prokka/Bakta gene-symbol attribute. ``product``
+    is the functional annotation; ``Name`` is the common fallback when product
+    is absent. Protein descriptions are never used as gene symbols.
+    """
+    parsed = _parse_gff_attributes(attributes)
+    gene_name = parsed.get('gene') or parsed.get('gene_name') or ''
+    annotation = parsed.get('product') or parsed.get('Name') or parsed.get('Note') or ''
+    if gene_name:
+        gene_name = gene_name.split(',', 1)[0].strip()
+    return gene_name, annotation.strip()
+
+
+def _write_gene_annotation(writer, genome_name, sequence_id, gene_name, annotation, source_gff):
+    if writer is None:
+        return
+    writer.writerow([
+        f"{genome_name}|{sequence_id}",
+        gene_name or "",
+        annotation or "",
+        os.path.basename(source_gff),
+    ])
+
+
+def iter_gene_annotations(path):
+    """Yield validated gene-annotation sidecar rows as dictionaries."""
+    with _open_text(path, "rt") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        required = {"sequence_id", "gene_name", "annotation"}
+        if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+            raise ValueError(
+                f"Gene-annotation file {path} must contain columns: "
+                "sequence_id, gene_name, annotation."
+            )
+        for line_number, row in enumerate(reader, start=2):
+            identifier = (row.get("sequence_id") or "").strip()
+            if not identifier:
+                raise ValueError(
+                    f"Empty sequence_id in gene-annotation file {path} at line {line_number}."
+                )
+            yield {
+                "sequence_id": identifier,
+                "gene_name": (row.get("gene_name") or "").strip(),
+                "annotation": (row.get("annotation") or "").strip(),
+            }
+
+
+def translate_dna_to_aa(dna_fasta, aa_fasta):
+    """Translate a DNA FASTA after strict IUPAC validation.
+
+    The amino-acid output is committed only if every input record is valid.
+    """
+    aa_path = os.fspath(aa_fasta)
+    record_count = 0
+
+    with _atomic_text_outputs([aa_path]) as outputs:
+        outfile = outputs[aa_path]
+        for header, dna_sequence in _iter_fasta_records(dna_fasta):
+            validate_nucleotide_sequence(
+                dna_sequence,
+                context=f"FASTA={dna_fasta}; record={header}",
+            )
+            aa_sequence = translate_frame(dna_sequence)
+            outfile.write(f"{header}\n{wrap_sequence(aa_sequence, 60)}\n")
+            record_count += 1
+
+    if record_count == 0:
+        # _iter_fasta_records already raises for an empty file; retained as a
+        # defensive assertion if the parser's behaviour changes in future.
+        raise ValueError(f"No DNA FASTA records were translated from {dna_fasta}.")
 
 
 def detect_sequence_type(fasta_file):
@@ -221,14 +681,19 @@ def wrap_sequence(sequence, width=60):
 
 
 def read_genomes_from_fasta(fasta_file):
+    """Return the genome identifiers in deterministic sorted order."""
     genomes = set()
-    with _open_text(fasta_file, 'rt') as file:
-        for line in file:
-            line = line.strip()
-            if line.startswith('>'):
-                genome = line.split('|')[1]
-                genomes.add(genome)
-    return list(genomes)
+    for header, _sequence in _iter_fasta_records(fasta_file):
+        sequence_id = header[1:].split(None, 1)[0]
+        parts = sequence_id.split("|")
+        if len(parts) < 2 or not parts[1]:
+            raise ValueError(
+                f"FASTA identifier {sequence_id!r} in {fasta_file} does not "
+                "contain the expected 'genome|sequence' structure."
+            )
+        genomes.add(parts[1])
+    return sorted(genomes)
+
 
 def read_fasta(fasta_file):
     sequences = {}
@@ -314,258 +779,627 @@ def run_mafft_on_sequences(options, sequences, output_file):
 
 
 
-def read_separate_files(input_dir, name_split_gff, name_split_fasta, gene_ident, combined_out, translate, run_as_combiner):
-    emit_pending_startup_messages()
-    if run_as_combiner == True:
-     combined_out_file_aa_path = None
-    else:
-     combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
+def read_separate_files(
+    input_dir,
+    name_split_gff,
+    name_split_fasta,
+    gene_ident,
+    combined_out,
+    translate,
+    run_as_combiner,
+    annotation_out=None,
+):
+    """Extract CDS records from paired GFF and FASTA files deterministically.
 
-    # Open actual AA file or os.devnull based on whether we need an AA file path
-    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
-    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
-        paired_files_found = None
-    #with open(combined_out, 'w') as combined_out_file, open(combined_out.replace('_dna.fasta','_aa.fasta'), 'w') as combined_out_file_aa:
-        gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff))
-        if not gff_files and not str(name_split_gff).endswith('.gz'):
-            gff_files = glob.glob(os.path.join(input_dir, '*' + name_split_gff + '.gz'))
-        if not gff_files:
-            logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split_gff)
-            sys.exit("Error: No GFF files found.")
+    GFF files are processed in basename-sorted order. Every extracted CDS is
+    checked against the IUPAC DNA alphabet and its source coordinates. Outputs
+    are committed only after all input files have been processed successfully.
+    """
+    emit_pending_startup_messages()
+    dna_output_path = os.fspath(combined_out)
+    requested_aa_path = None
+    if not run_as_combiner:
+        requested_aa_path = dna_output_path.replace("_dna.fasta", "_aa.fasta")
+        if requested_aa_path == dna_output_path:
+            raise ValueError(
+                "The combined output filename must contain '_dna.fasta' when "
+                "run_as_combiner=False, so a separate '_aa.fasta' path can be made."
+            )
+
+    aa_output_path = requested_aa_path if translate else None
+    annotation_output_path = os.fspath(annotation_out) if annotation_out else None
+    output_paths = [dna_output_path, aa_output_path]
+    if annotation_output_path:
+        output_paths.append(annotation_output_path)
+    gff_files = _sorted_input_files(
+        input_dir, name_split_gff, gzip_fallback=True
+    )
+    if not gff_files:
+        raise FileNotFoundError(
+            f"No GFF files found in {input_dir} (pattern: *{name_split_gff})."
+        )
+
+    logger.info(
+        "Extracting paired GFF/FASTA inputs in deterministic basename order: %s GFF files.",
+        f"{len(gff_files):,}",
+    )
+
+    paired_files_found = False
+    missing_pairs = []
+    with _atomic_text_outputs(output_paths) as outputs:
+        dna_handle = outputs[dna_output_path]
+        aa_handle = outputs[aa_output_path]
+        annotation_handle = outputs[annotation_output_path] if annotation_output_path else None
+        annotation_writer = csv.writer(annotation_handle, delimiter="\t", lineterminator="\n") if annotation_handle else None
+        if annotation_writer:
+            annotation_writer.writerow(["sequence_id", "gene_name", "annotation", "source_gff"])
+
         for gff_file in gff_files:
-            genome_name = os.path.basename(gff_file).split(name_split_gff)[0]
-            if name_split_fasta == None:
-                possible_extensions = ['.fa', '.fasta', '.fna', '.fa.gz', '.fasta.gz', '.fna.gz']
-                corresponding_fasta_file = None
-                for ext in possible_extensions:
-                    temp_file = os.path.splitext(gff_file)[0] + ext
-                    if os.path.exists(temp_file):
-                        corresponding_fasta_file = temp_file
-                        break
+            gff_basename = os.path.basename(gff_file)
+            if gff_basename.endswith(name_split_gff):
+                genome_name = gff_basename[:-len(name_split_gff)] if name_split_gff else gff_basename
+            else:
+                # This is the .gz fallback when name_split_gff excludes '.gz'.
+                suffix = str(name_split_gff) + ".gz"
+                genome_name = gff_basename[:-len(suffix)] if gff_basename.endswith(suffix) else os.path.splitext(gff_basename)[0]
+
+            if name_split_fasta is None:
+                # Strip both compression and annotation extensions before trying
+                # the conventional per-genome FASTA suffixes.
+                fasta_stem = gff_basename
+                if fasta_stem.lower().endswith(".gz"):
+                    fasta_stem = fasta_stem[:-3]
+                fasta_stem = os.path.splitext(fasta_stem)[0]
+                possible_extensions = (
+                    ".fa", ".fasta", ".fna",
+                    ".fa.gz", ".fasta.gz", ".fna.gz",
+                )
+                corresponding_fasta_file = next(
+                    (
+                        os.path.join(input_dir, fasta_stem + extension)
+                        for extension in possible_extensions
+                        if os.path.isfile(os.path.join(input_dir, fasta_stem + extension))
+                    ),
+                    None,
+                )
                 if corresponding_fasta_file is None:
-                    logger.warning("Corresponding FASTA file for GFF file '%s' not found. Skipping. Try using the -name_split_fasta option.", gff_file)
+                    logger.warning(
+                        "Corresponding FASTA for GFF '%s' was not found; this pair cannot be processed.",
+                        gff_file,
+                    )
+                    missing_pairs.append(gff_file)
                     continue
             else:
-                corresponding_fasta_file = os.path.join(input_dir, genome_name + name_split_fasta)
-                if not os.path.exists(corresponding_fasta_file):
-                    logger.warning("Corresponding FASTA file for GFF file '%s' not found: expected '%s'. Skipping. Try using the -name_split_fasta option.", gff_file, corresponding_fasta_file)
+                corresponding_fasta_file = os.path.join(
+                    input_dir, genome_name + str(name_split_fasta)
+                )
+                if not os.path.isfile(corresponding_fasta_file):
+                    logger.warning(
+                        "Corresponding FASTA for GFF '%s' was not found: expected '%s'.",
+                        gff_file, corresponding_fasta_file,
+                    )
+                    missing_pairs.append(gff_file)
                     continue
 
             gff_features = []
-            paired_files_found = True
-            with _open_text(gff_file, 'rt') as file:
-                seen_seq_ids = collections.defaultdict(int)
-                for line in file:
-                    line_data = line.split('\t')
-                    if len(line_data) == 9:
-                        if feature_matches_gene_ident(line_data[2], gene_ident):
-                            seq_id = _extract_gff_identifier(line_data[8])
-                            original_seq_id = seq_id
-                            contig = line_data[0]
-                            feature = line_data[2]
-                            strand = line_data[6]
-                            start, end = int(line_data[3]), int(line_data[4])
-                            if original_seq_id in seen_seq_ids:
-                                seq_id = original_seq_id + '_' + str(seen_seq_ids[original_seq_id])
-                                seen_seq_ids[original_seq_id] += 1
-                            else:
-                                seen_seq_ids[original_seq_id] = 1
-                            gff_features.append((contig, start, end, strand, feature,  seq_id))
-            fasta_dict = collections.defaultdict(lambda: ['', ''])
-            with _open_text(corresponding_fasta_file, 'rt') as file:
-                current_contig = None
-                for line in file:
-                    if line.startswith('>'):
-                        current_contig = line[1:].split()[0]
-                        fasta_dict[current_contig] = ['', '']
-                    else:
-                        fasta_dict[current_contig][0] += line.strip()
-
-            for contig, fasta in fasta_dict.items():
-                reverse_sequence = reverse_complement(fasta[0])
-                fasta_dict[contig][1] = reverse_sequence
-
-            if fasta_dict and gff_features:
-                for contig, start, end, strand, feature, seq_id in gff_features:
-                    if contig in fasta_dict:
-                        if strand == '+':
-                            full_sequence = fasta_dict[contig][0]
-                            seq = full_sequence[start - 1:end]
-                        elif strand == '-':
-                            corrected_start = max(len(fasta_dict[contig][0]) - int(end), 0)
-                            corrected_stop = max(len(fasta_dict[contig][0]) - int(start) + 1, 0)
-                            full_sequence = fasta_dict[contig][1]
-                            seq = full_sequence[corrected_start:corrected_stop]
-
-                        if run_as_combiner == True:
-                            if translate == True:
-                                seq_aa = translate_frame(seq)
-                                wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                                combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                            else:
-                                wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                                combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
-                        else:
-                            if translate == True:
-                                seq_aa = translate_frame(seq)
-                                wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                                combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                            wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                            combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
-
-    if not paired_files_found:
-        logger.error("Could not find matching GFF/FASTA files. Please check input directory and -name_split_gff / -name_split_fasta parameters.")
-        sys.exit("Could not find matching GFF/FASTA files - Please check input directory and -name_split_gff and -name_split_fasta parameters.")
-    if translate == False or translate == None:
-        # Clean up unused file only if it was a real file we created (never remove os.devnull)
-        if combined_out_file_aa_path:
-            try:
-                if os.path.exists(combined_out_file_aa_path):
-                    os.remove(combined_out_file_aa_path)
-            except Exception:
-                pass
-
-
-def read_combined_files(input_dir, name_split, gene_ident, combined_out, translate, run_as_combiner):
-    emit_pending_startup_messages()
-    if run_as_combiner == True:
-        combined_out_file_aa_path = None
-    else:
-        combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
-
-    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
-    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
-        gff_files = glob.glob(os.path.join(input_dir, '*' + name_split))
-        if not gff_files and not str(name_split).endswith('.gz'):
-            gff_files = glob.glob(os.path.join(input_dir, '*' + name_split + '.gz'))
-        if not gff_files:
-            logger.error("Error: No GFF files found in %s (pattern: *%s).", input_dir, name_split)
-            sys.exit("Error: No GFF files found - check input directory and -name_split_gff parameter.")
-        for gff_file in gff_files:
-            genome_name = os.path.basename(gff_file).split(name_split)[0]
-            fasta_dict = collections.defaultdict(lambda: ['', ''])
-            gff_features = []
-            with _open_text(gff_file, 'rt') as file:
-                seen_seq_ids = collections.defaultdict(int)
-                fasta_section = False
-                for line in file:
-                    if line.startswith('##FASTA'):
-                        fasta_section = True
+            circular_contigs = set()
+            with _open_text(gff_file, "rt") as gff_handle:
+                seen_sequence_ids = collections.defaultdict(int)
+                for line_number, raw_line in enumerate(gff_handle, start=1):
+                    line = raw_line.rstrip("\r\n")
+                    if not line or line.startswith("#"):
                         continue
-                    if fasta_section:
-                        if line.startswith('>'):
-                            current_contig = line[1:].split()[0]
-                            fasta_dict[current_contig] = ['','']
-                        else:
-                            fasta_dict[current_contig][0] +=line.strip()
+                    fields = line.split("\t")
+                    if len(fields) != 9:
+                        raise ValueError(
+                            f"Malformed GFF3 record: expected 9 tab-delimited fields, "
+                            f"found {len(fields)}. GFF={gff_file}; line={line_number}"
+                        )
+                    if _gff_declares_circular(fields[8]):
+                        circular_contigs.add(fields[0])
+                    if not feature_matches_gene_ident(fields[2], gene_ident):
+                        continue
+                    try:
+                        start = int(fields[3])
+                        end = int(fields[4])
+                    except ValueError as error:
+                        raise ValueError(
+                            f"Non-integer GFF coordinates. GFF={gff_file}; line={line_number}"
+                        ) from error
+
+                    try:
+                        sequence_id = _extract_gff_identifier(fields[8])
+                    except ValueError as error:
+                        raise ValueError(
+                            f"Could not identify GFF feature. GFF={gff_file}; line={line_number}: {error}"
+                        ) from error
+
+                    original_id = sequence_id
+                    if original_id in seen_sequence_ids:
+                        sequence_id = f"{original_id}_{seen_sequence_ids[original_id]}"
+                        seen_sequence_ids[original_id] += 1
                     else:
-                        line_data = line.split('\t')
-                        if len(line_data) == 9:
-                            if feature_matches_gene_ident(line_data[2], gene_ident):
-                                contig = line_data[0]
-                                feature = line_data[2]
-                                strand = line_data[6]
-                                start, end = int(line_data[3]), int(line_data[4])
-                                seq_id = _extract_gff_identifier(line_data[8])
-                                original_seq_id = seq_id
-                                if original_seq_id in seen_seq_ids:
-                                    seq_id = original_seq_id + '_' + str(seen_seq_ids[original_seq_id])
-                                    seen_seq_ids[original_seq_id] += 1
-                                else:
-                                    seen_seq_ids[original_seq_id] = 1
-                                gff_features.append((contig, start, end, strand, feature,  seq_id))
+                        seen_sequence_ids[original_id] = 1
 
-                for contig, fasta in fasta_dict.items():
-                    reverse_sequence = reverse_complement(fasta[0])
-                    fasta_dict[contig][1] = reverse_sequence
+                    gene_name, annotation = _gff_gene_metadata(fields[8])
+                    gff_features.append(
+                        (fields[0], start, end, fields[6], sequence_id, line_number,
+                         gene_name, annotation)
+                    )
 
-                if fasta_dict and gff_features:
-                    for contig, start, end, strand, feature, seq_id in gff_features:
-                        if contig in fasta_dict:
-                            if strand == '+':
-                                full_sequence = fasta_dict[contig][0]
-                                seq = full_sequence[start - 1:end]
-                            elif strand == '-':
-                                corrected_start = max(len(fasta_dict[contig][0]) - int(end), 0)
-                                corrected_stop = max(len(fasta_dict[contig][0]) - int(start) + 1, 0)
-                                full_sequence = fasta_dict[contig][1]
-                                seq = full_sequence[corrected_start:corrected_stop]
+            contig_sequences = _read_fasta_sequences_by_id(corresponding_fasta_file)
+            paired_files_found = True
 
-                            if run_as_combiner == True:
-                                if translate == True:
-                                    seq_aa = translate_frame(seq)
-                                    wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                                    combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                                else:
-                                    wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                                    combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+            for (contig, start, end, strand, sequence_id, line_number,
+                 gene_name, annotation) in gff_features:
+                context = (
+                    f"GFF={gff_file}; FASTA={corresponding_fasta_file}; "
+                    f"genome={genome_name}; gene={sequence_id}; contig={contig}; "
+                    f"coordinates={start}-{end}; strand={strand}; GFF_line={line_number}"
+                )
+                sequence = _extract_gff_feature_sequence(
+                    contig_sequences,
+                    contig=contig,
+                    start=start,
+                    end=end,
+                    strand=strand,
+                    context=context,
+                    circular_contigs=circular_contigs,
+                )
+
+                _write_gene_annotation(
+                    annotation_writer, genome_name, sequence_id,
+                    gene_name, annotation, gff_file,
+                )
+
+                if run_as_combiner:
+                    output_sequence = translate_frame(sequence) if translate else sequence
+                    dna_handle.write(
+                        f">{genome_name}|{sequence_id}\n{wrap_sequence(output_sequence, 60)}\n"
+                    )
+                else:
+                    if translate:
+                        aa_sequence = translate_frame(sequence)
+                        aa_handle.write(
+                            f">{genome_name}|{sequence_id}\n{wrap_sequence(aa_sequence, 60)}\n"
+                        )
+                    dna_handle.write(
+                        f">{genome_name}|{sequence_id}\n{wrap_sequence(sequence, 60)}\n"
+                    )
+
+        if missing_pairs:
+            examples = ", ".join(os.path.basename(item) for item in missing_pairs[:10])
+            suffix = " ..." if len(missing_pairs) > 10 else ""
+            raise FileNotFoundError(
+                f"Missing paired FASTA files for {len(missing_pairs):,} GFF inputs: "
+                f"{examples}{suffix}. No extraction outputs were committed."
+            )
+        if not paired_files_found:
+            raise FileNotFoundError(
+                "No matching GFF/FASTA pairs were found. Check -name_split_gff and "
+                "-name_split_fasta, or provide the corresponding per-genome FASTA files."
+            )
+
+    # Remove an obsolete AA output only after the DNA extraction has succeeded.
+    if requested_aa_path and not translate and os.path.exists(requested_aa_path):
+        try:
+            os.remove(requested_aa_path)
+        except OSError as error:
+            logger.warning("Could not remove obsolete amino-acid output %s: %s", requested_aa_path, error)
+
+
+
+class _ExtractionProgress:
+    """Lightweight standard-library progress display for multi-file extraction.
+
+    Progress is measured in input GFF files, with an additional running count
+    of successfully extracted gene sequences.  It writes to stderr so normal
+    PyamilySeq log messages remain readable on stdout.  When stderr is not a
+    terminal, it emits periodic 5-percent progress log messages instead.
+    """
+
+    def __init__(self, total, description, progress_logger):
+        self.total = max(0, int(total))
+        self.description = str(description)
+        self.logger = progress_logger
+        self.completed = 0
+        self.records = 0
+        self.current = ""
+        self.started = time.monotonic()
+        self.is_tty = bool(getattr(sys.stderr, "isatty", lambda: False)())
+        self.next_log_percent = 5
+        self.last_rendered_records = 0
+        self.closed = False
+
+        self.logger.info(
+            "%s: processing %s input GFF files.",
+            self.description, f"{self.total:,}"
+        )
+        if self.is_tty:
+            self._render()
+
+    @staticmethod
+    def _elapsed(seconds):
+        seconds = max(0, int(seconds))
+        hours, remainder = divmod(seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        if hours:
+            return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def set_current(self, name):
+        self.current = os.path.basename(str(name))
+        if self.is_tty:
+            self._render()
+
+    def add_records(self, count=1):
+        self.records += int(count)
+        # Refresh the live terminal display every 1,000 genes, avoiding a costly
+        # terminal write for every single extracted sequence.
+        if self.is_tty and self.records - self.last_rendered_records >= 1000:
+            self._render()
+
+    def file_complete(self):
+        self.completed = min(self.total, self.completed + 1)
+        self.current = ""
+        self._render()
+
+    def _render(self, force=False):
+        if self.total:
+            fraction = min(1.0, self.completed / self.total)
+        else:
+            fraction = 1.0
+        percent = fraction * 100.0
+        elapsed = self._elapsed(time.monotonic() - self.started)
+
+        if self.is_tty:
+            width = 24
+            filled = int(width * fraction)
+            bar = "=" * filled + (">" if filled < width else "") + " " * max(0, width - filled - 1)
+            current = self.current
+            if len(current) > 28:
+                current = current[:12] + "..." + current[-13:]
+            suffix = f" | {current}" if current else ""
+            message = (
+                f"\r{self.description[:18]:18s} [{bar}] {percent:5.1f}% "
+                f"{self.completed:,}/{self.total:,} GFFs | "
+                f"{self.records:,} genes | {elapsed}{suffix}"
+            )
+            sys.stderr.write(message)
+            sys.stderr.flush()
+            self.last_rendered_records = self.records
+            return
+
+        if force or (percent >= self.next_log_percent and self.completed < self.total):
+            self.logger.info(
+                "%s: %.1f%% (%s/%s GFF files); %s genes extracted; elapsed %s.",
+                self.description, percent, f"{self.completed:,}",
+                f"{self.total:,}", f"{self.records:,}", elapsed,
+            )
+            while self.next_log_percent <= percent:
+                self.next_log_percent += 5
+
+    def close(self):
+        if self.closed:
+            return
+        self.closed = True
+        if self.is_tty:
+            # file_complete() has already rendered the final 100% state.
+            # If extraction was interrupted, render the partial state here.
+            if self.completed < self.total:
+                self._render()
+            sys.stderr.write("\n")
+            sys.stderr.flush()
+        else:
+            self._render(force=True)
+
+        elapsed = self._elapsed(time.monotonic() - self.started)
+        if self.completed == self.total:
+            self.logger.info(
+                "Finished %s: extracted %s genes from %s GFF files in %s.",
+                self.description.lower(), f"{self.records:,}",
+                f"{self.completed:,}", elapsed,
+            )
+        else:
+            self.logger.warning(
+                "%s stopped after %s of %s GFF files; %s genes had been extracted in %s.",
+                self.description, f"{self.completed:,}", f"{self.total:,}",
+                f"{self.records:,}", elapsed,
+            )
+
+
+def read_combined_files(
+    input_dir,
+    name_split,
+    gene_ident,
+    combined_out,
+    translate,
+    run_as_combiner,
+    progress_logger=None,
+    annotation_out=None,
+):
+    """Extract CDS records from combined GFF3 files deterministically.
+
+    GFF inputs are processed in basename-sorted order. Embedded contig FASTA
+    records and CDS coordinates are checked, and every extracted CDS is
+    validated against the strict IUPAC DNA alphabet before it is written.
+    Outputs are atomically replaced only after successful completion.
+    """
+    emit_pending_startup_messages()
+    log = progress_logger or logging.getLogger("PyamilySeq.PyamilySeq")
+    dna_output_path = os.fspath(combined_out)
+    requested_aa_path = None
+    if not run_as_combiner:
+        requested_aa_path = dna_output_path.replace("_dna.fasta", "_aa.fasta")
+        if requested_aa_path == dna_output_path:
+            raise ValueError(
+                "The combined output filename must contain '_dna.fasta' when "
+                "run_as_combiner=False, so a separate '_aa.fasta' path can be made."
+            )
+
+    aa_output_path = requested_aa_path if translate else None
+    annotation_output_path = os.fspath(annotation_out) if annotation_out else None
+    output_paths = [dna_output_path, aa_output_path]
+    if annotation_output_path:
+        output_paths.append(annotation_output_path)
+    gff_files = _sorted_input_files(input_dir, name_split, gzip_fallback=True)
+    if not gff_files:
+        raise FileNotFoundError(
+            f"No GFF files found in {input_dir} (pattern: *{name_split})."
+        )
+
+    log.info(
+        "Input GFF files will be processed in deterministic basename order (%s files).",
+        f"{len(gff_files):,}",
+    )
+
+    if run_as_combiner:
+        output_description = "Extracting CDS (translated AA)" if translate else "Extracting CDS (DNA)"
+    elif translate:
+        output_description = "Extracting CDS (DNA + AA)"
+    else:
+        output_description = "Extracting CDS (DNA)"
+
+    progress = _ExtractionProgress(
+        total=len(gff_files),
+        description=output_description,
+        progress_logger=log,
+    )
+
+    try:
+        with _atomic_text_outputs(output_paths) as outputs:
+            dna_handle = outputs[dna_output_path]
+            aa_handle = outputs[aa_output_path]
+            annotation_handle = outputs[annotation_output_path] if annotation_output_path else None
+            annotation_writer = csv.writer(annotation_handle, delimiter="\t", lineterminator="\n") if annotation_handle else None
+            if annotation_writer:
+                annotation_writer.writerow(["sequence_id", "gene_name", "annotation", "source_gff"])
+
+            for gff_file in gff_files:
+                genome_name = os.path.basename(gff_file)
+                if genome_name.endswith(name_split):
+                    genome_name = genome_name[:-len(name_split)] if name_split else genome_name
+                else:
+                    compressed_suffix = str(name_split) + ".gz"
+                    if genome_name.endswith(compressed_suffix):
+                        genome_name = genome_name[:-len(compressed_suffix)]
+
+                progress.set_current(genome_name)
+                contig_chunks = collections.defaultdict(list)
+                gff_features = []
+                circular_contigs = set()
+                fasta_section = False
+                current_contig = None
+
+                with _open_text(gff_file, "rt") as gff_handle:
+                    seen_sequence_ids = collections.defaultdict(int)
+                    for line_number, raw_line in enumerate(gff_handle, start=1):
+                        line = raw_line.rstrip("\r\n")
+                        if not line:
+                            continue
+
+                        if line == "##FASTA":
+                            fasta_section = True
+                            continue
+
+                        if fasta_section:
+                            if line.startswith(">"):
+                                header = line[1:].strip()
+                                if not header:
+                                    raise ValueError(
+                                        f"Empty embedded FASTA header. GFF={gff_file}; line={line_number}"
+                                    )
+                                current_contig = header.split(None, 1)[0]
+                                if current_contig in contig_chunks:
+                                    raise ValueError(
+                                        f"Duplicate embedded FASTA contig {current_contig!r}. "
+                                        f"GFF={gff_file}; line={line_number}"
+                                    )
+                                contig_chunks[current_contig] = []
                             else:
-                                if translate == True:
-                                    seq_aa = translate_frame(seq)
-                                    wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                                    combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                                wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                                combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+                                if current_contig is None:
+                                    raise ValueError(
+                                        f"Embedded FASTA sequence occurs before a header. "
+                                        f"GFF={gff_file}; line={line_number}"
+                                    )
+                                contig_chunks[current_contig].append("".join(line.split()))
+                            continue
 
-    if translate == False or translate == None:
-        # Clean up unused file only if it was a real file we created (never remove os.devnull)
-        if combined_out_file_aa_path:
-            try:
-                if os.path.exists(combined_out_file_aa_path):
-                    os.remove(combined_out_file_aa_path)
-            except Exception:
-                pass
+                        if line.startswith("#"):
+                            continue
 
+                        fields = line.split("\t")
+                        if len(fields) != 9:
+                            raise ValueError(
+                                f"Malformed GFF3 record: expected 9 tab-delimited fields, "
+                                f"found {len(fields)}. GFF={gff_file}; line={line_number}"
+                            )
+                        if _gff_declares_circular(fields[8]):
+                            circular_contigs.add(fields[0])
+                        if not feature_matches_gene_ident(fields[2], gene_ident):
+                            continue
+                        try:
+                            start = int(fields[3])
+                            end = int(fields[4])
+                        except ValueError as error:
+                            raise ValueError(
+                                f"Non-integer GFF coordinates. GFF={gff_file}; line={line_number}"
+                            ) from error
+
+                        try:
+                            sequence_id = _extract_gff_identifier(fields[8])
+                        except ValueError as error:
+                            raise ValueError(
+                                f"Could not identify GFF feature. GFF={gff_file}; "
+                                f"line={line_number}: {error}"
+                            ) from error
+
+                        original_id = sequence_id
+                        if original_id in seen_sequence_ids:
+                            sequence_id = f"{original_id}_{seen_sequence_ids[original_id]}"
+                            seen_sequence_ids[original_id] += 1
+                        else:
+                            seen_sequence_ids[original_id] = 1
+
+                        gene_name, annotation = _gff_gene_metadata(fields[8])
+                        gff_features.append(
+                            (fields[0], start, end, fields[6], sequence_id, line_number,
+                             gene_name, annotation)
+                        )
+
+                contig_sequences = {
+                    contig: "".join(chunks)
+                    for contig, chunks in contig_chunks.items()
+                }
+
+                if gff_features and not contig_sequences:
+                    raise ValueError(
+                        f"GFF contains selected gene features but no embedded FASTA section. "
+                        f"GFF={gff_file}"
+                    )
+
+                for (contig, start, end, strand, sequence_id, line_number,
+                     gene_name, annotation) in gff_features:
+                    context = (
+                        f"GFF={gff_file}; genome={genome_name}; gene={sequence_id}; "
+                        f"contig={contig}; coordinates={start}-{end}; "
+                        f"strand={strand}; GFF_line={line_number}"
+                    )
+                    sequence = _extract_gff_feature_sequence(
+                        contig_sequences,
+                        contig=contig,
+                        start=start,
+                        end=end,
+                        strand=strand,
+                        context=context,
+                        circular_contigs=circular_contigs,
+                    )
+
+                    _write_gene_annotation(
+                        annotation_writer, genome_name, sequence_id,
+                        gene_name, annotation, gff_file,
+                    )
+
+                    if run_as_combiner:
+                        output_sequence = translate_frame(sequence) if translate else sequence
+                        dna_handle.write(
+                            f">{genome_name}|{sequence_id}\n{wrap_sequence(output_sequence, 60)}\n"
+                        )
+                    else:
+                        if translate:
+                            aa_sequence = translate_frame(sequence)
+                            aa_handle.write(
+                                f">{genome_name}|{sequence_id}\n{wrap_sequence(aa_sequence, 60)}\n"
+                            )
+                        dna_handle.write(
+                            f">{genome_name}|{sequence_id}\n{wrap_sequence(sequence, 60)}\n"
+                        )
+                    progress.add_records()
+
+                progress.file_complete()
+    finally:
+        progress.close()
+
+    if requested_aa_path and not translate and os.path.exists(requested_aa_path):
+        try:
+            os.remove(requested_aa_path)
+        except OSError as error:
+            logger.warning("Could not remove obsolete amino-acid output %s: %s", requested_aa_path, error)
 
 
 def read_fasta_files(input_dir, name_split_fasta, combined_out, translate, run_as_combiner):
+    """Combine per-genome FASTA files in deterministic file and record order.
+
+    When ``translate=True`` the input is treated as nucleotide sequence and is
+    strictly IUPAC-validated before translation. When ``translate=False`` the
+    input alphabet is left unchanged because this legacy helper is also used for
+    non-translated sequence input.
+    """
     emit_pending_startup_messages()
-    if run_as_combiner == True:
-     combined_out_file_aa_path = None
-    else:
-     combined_out_file_aa_path = combined_out.replace('_dna.fasta','_aa.fasta')
+    dna_output_path = os.fspath(combined_out)
+    requested_aa_path = None
+    if not run_as_combiner:
+        requested_aa_path = dna_output_path.replace("_dna.fasta", "_aa.fasta")
+        if requested_aa_path == dna_output_path:
+            raise ValueError(
+                "The combined output filename must contain '_dna.fasta' when "
+                "run_as_combiner=False, so a separate '_aa.fasta' path can be made."
+            )
 
-    aa_handle = open(combined_out_file_aa_path, 'w') if combined_out_file_aa_path else open(os.devnull, 'w')
-    with open(combined_out, 'w') as combined_out_file, aa_handle as combined_out_file_aa:
-        fasta_files = glob.glob(os.path.join(input_dir, '*' + name_split_fasta))
-        if not fasta_files:
-            logger.error("Error: No FASTA files found in %s (pattern: *%s).", input_dir, name_split_fasta)
-            sys.exit("Error: No FASTA files found.")
+    aa_output_path = requested_aa_path if translate else None
+    fasta_files = _sorted_input_files(input_dir, name_split_fasta)
+    if not fasta_files:
+        raise FileNotFoundError(
+            f"No FASTA files found in {input_dir} (pattern: *{name_split_fasta})."
+        )
+
+    logger.info(
+        "Input FASTA files will be processed in deterministic basename order (%s files).",
+        f"{len(fasta_files):,}",
+    )
+
+    with _atomic_text_outputs([dna_output_path, aa_output_path]) as outputs:
+        dna_handle = outputs[dna_output_path]
+        aa_handle = outputs[aa_output_path]
+
         for fasta_file in fasta_files:
-            genome_name = os.path.basename(fasta_file).split(name_split_fasta)[0]
-            fasta_dict = collections.defaultdict(str)
-            with _open_text(fasta_file, 'rt') as file:
-                for line in file:
-                    if line.startswith('>'):
-                        current_seq = line[1:].split()[0]
-                        fasta_dict[current_seq] = ''
-                    else:
-                        fasta_dict[current_seq] +=line.strip()
-                for seq_id, seq in fasta_dict.items():
-                    if run_as_combiner == True:
-                        if translate == True:
-                            seq_aa = translate_frame(seq)
-                            wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                            combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                        else:
-                            wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                            combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
-                    else:
-                        if translate == True:
-                            seq_aa = translate_frame(seq)
-                            wrapped_sequence_aa = '\n'.join([seq_aa[i:i + 60] for i in range(0, len(seq_aa), 60)])
-                            combined_out_file_aa.write(f">{genome_name}|{seq_id}\n{wrapped_sequence_aa}\n")
-                        wrapped_sequence = '\n'.join([seq[i:i + 60] for i in range(0, len(seq), 60)])
-                        combined_out_file.write(f">{genome_name}|{seq_id}\n{wrapped_sequence}\n")
+            filename = os.path.basename(fasta_file)
+            genome_name = filename[:-len(name_split_fasta)] if name_split_fasta else filename
 
-    if translate == False or translate == None:
-        # Clean up unused file only if it was a real file we created (never remove os.devnull)
-        if combined_out_file_aa_path:
-            try:
-                if os.path.exists(combined_out_file_aa_path):
-                    os.remove(combined_out_file_aa_path)
-            except Exception:
-                pass
+            for header, sequence in _iter_fasta_records(fasta_file):
+                sequence_id = header[1:].split(None, 1)[0]
+                if translate:
+                    validate_nucleotide_sequence(
+                        sequence,
+                        context=(
+                            f"FASTA={fasta_file}; genome={genome_name}; "
+                            f"record={header}"
+                        ),
+                    )
+                    aa_sequence = translate_frame(sequence)
+                else:
+                    aa_sequence = None
+
+                if run_as_combiner:
+                    output_sequence = aa_sequence if translate else sequence
+                    dna_handle.write(
+                        f">{genome_name}|{sequence_id}\n{wrap_sequence(output_sequence, 60)}\n"
+                    )
+                else:
+                    if translate:
+                        aa_handle.write(
+                            f">{genome_name}|{sequence_id}\n{wrap_sequence(aa_sequence, 60)}\n"
+                        )
+                    dna_handle.write(
+                        f">{genome_name}|{sequence_id}\n{wrap_sequence(sequence, 60)}\n"
+                    )
+
+    if requested_aa_path and not translate and os.path.exists(requested_aa_path):
+        try:
+            os.remove(requested_aa_path)
+        except OSError as error:
+            logger.warning("Could not remove obsolete amino-acid output %s: %s", requested_aa_path, error)
+
 
 def write_individual_groups(options, output_dir, key_order, cores, sequences,
                             pangenome_clusters_First_sequences_sorted,

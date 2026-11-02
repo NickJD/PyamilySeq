@@ -13,7 +13,10 @@ import subprocess
 from collections import defaultdict
 from pathlib import Path
 
-from .order_analysis import FASTA_SUFFIXES, _normalise_genome_name, _open_text, _stem_without_suffix
+try:
+    from .order_analysis import FASTA_SUFFIXES, _normalise_genome_name, _open_text, _stem_without_suffix
+except ImportError:  # Support direct execution from a source checkout.
+    from order_analysis import FASTA_SUFFIXES, _normalise_genome_name, _open_text, _stem_without_suffix
 
 PRESETS = {"asm5", "asm10", "asm20"}
 BLOCK_FIELDS = [

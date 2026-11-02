@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import json
 import math
 import os
 import subprocess
 import logging
+import sqlite3
+import tempfile
 from collections import Counter, OrderedDict
 
 try:
@@ -161,41 +164,205 @@ def classify_families(ledger, mode, group_text):
     return categories, groups
 
 
-def _write_gpa(path, ledger, family_ids, mode):
+class _GeneAnnotationStore:
+    """Disk-backed lookup for per-gene GFF annotations during GPA writing.
+
+    The sidecar can contain millions of rows. Keeping it in a Python dictionary
+    would add substantial memory pressure to a workflow that otherwise streams
+    sequence storage through SQLite.
+    """
+
+    def __init__(self, annotation_files=None, temp_dir=None):
+        if annotation_files is None:
+            annotation_files = []
+        elif isinstance(annotation_files, (str, os.PathLike)):
+            annotation_files = [os.fspath(annotation_files)]
+        else:
+            annotation_files = [os.fspath(item) for item in annotation_files if item]
+
+        self.annotation_files = list(dict.fromkeys(annotation_files))
+        missing = [path for path in self.annotation_files if not os.path.isfile(path)]
+        if missing:
+            raise FamilyInputError(
+                "Gene-annotation sidecar file(s) not found: " + ", ".join(missing)
+            )
+        if not self.annotation_files:
+            self.path = None
+            self.connection = None
+            self.lookup_cursor = None
+            self.count = 0
+            return
+
+        handle = tempfile.NamedTemporaryFile(
+            prefix="pyamilyseq_gene_annotations_", suffix=".sqlite3",
+            dir=temp_dir, delete=False
+        )
+        self.path = handle.name
+        handle.close()
+        self.connection = sqlite3.connect(self.path)
+        self.connection.execute(
+            "CREATE TABLE annotations ("
+            "sequence_id TEXT PRIMARY KEY, gene_name TEXT NOT NULL, annotation TEXT NOT NULL)"
+        )
+        self.count = 0
+        self.lookup_cursor = None
+        try:
+            self._load()
+            self.lookup_cursor = self.connection.cursor()
+        except sqlite3.IntegrityError as error:
+            self.close()
+            raise FamilyInputError(
+                "Duplicate sequence identifiers were found in gene-annotation sidecar files. "
+                "Check for overlapping or duplicated GFF inputs."
+            ) from error
+        except Exception:
+            self.close()
+            raise
+
+    def _load(self):
+        batch = []
+        cursor = self.connection.cursor()
+        for path in self.annotation_files:
+            opener = gzip.open if str(path).lower().endswith(".gz") else open
+            with opener(path, "rt", encoding="utf-8", newline="") as handle:
+                reader = csv.DictReader(handle, delimiter="\t")
+                required = {"sequence_id", "gene_name", "annotation"}
+                if not reader.fieldnames or not required.issubset(set(reader.fieldnames)):
+                    raise FamilyInputError(
+                        f"Gene-annotation file {path} must contain columns: "
+                        "sequence_id, gene_name, annotation."
+                    )
+                for line_number, row in enumerate(reader, start=2):
+                    identifier = (row.get("sequence_id") or "").strip()
+                    if not identifier:
+                        raise FamilyInputError(
+                            f"Empty sequence_id in gene-annotation file {path} at line {line_number}."
+                        )
+                    gene_name = (row.get("gene_name") or "").strip()
+                    annotation = (row.get("annotation") or "").strip()
+                    existing = cursor.execute(
+                        "SELECT gene_name, annotation FROM annotations WHERE sequence_id = ?",
+                        (identifier,),
+                    ).fetchone()
+                    if existing:
+                        if existing != (gene_name, annotation):
+                            raise FamilyInputError(
+                                f"Conflicting GFF annotations for sequence {identifier!r} "
+                                f"in {path}. Check for duplicate genome/gene identifiers."
+                            )
+                        continue
+                    batch.append((identifier, gene_name, annotation))
+                    if len(batch) >= 10000:
+                        cursor.executemany(
+                            "INSERT INTO annotations VALUES (?, ?, ?)", batch
+                        )
+                        self.count += len(batch)
+                        batch.clear()
+        if batch:
+            cursor.executemany("INSERT INTO annotations VALUES (?, ?, ?)", batch)
+            self.count += len(batch)
+        try:
+            self.connection.commit()
+        except sqlite3.IntegrityError as error:
+            raise FamilyInputError(
+                "Duplicate sequence identifiers were found in gene-annotation sidecar files. "
+                "Check for overlapping or duplicated GFF inputs."
+            ) from error
+
+    def get(self, sequence_id):
+        if self.lookup_cursor is None:
+            return "", ""
+        try:
+            self.lookup_cursor.execute(
+                "SELECT gene_name, annotation FROM annotations WHERE sequence_id = ?",
+                (sequence_id,),
+            )
+            return self.lookup_cursor.fetchone() or ("", "")
+        except sqlite3.Error as error:
+            raise FamilyInputError(
+                f"Could not retrieve GFF annotation for sequence {sequence_id!r}: {error}"
+            ) from error
+
+    def close(self):
+        connection = getattr(self, "connection", None)
+        if connection is not None:
+            connection.close()
+            self.connection = None
+        path = getattr(self, "path", None)
+        if path:
+            for suffix in ("", "-journal", "-wal", "-shm"):
+                candidate = path + suffix
+                try:
+                    os.remove(candidate)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logging.getLogger("PyamilySeq.PyamilySeq").warning(
+                        "Could not remove temporary gene-annotation database %s", candidate
+                    )
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+
+def _family_metadata_consensus(values):
+    """Return the most frequent non-empty value, breaking ties lexically."""
+    counts = Counter(value for value in values if value)
+    if not counts:
+        return ""
+    maximum = max(counts.values())
+    return sorted(value for value, count in counts.items() if count == maximum)[0]
+
+
+def _write_gpa(path, ledger, family_ids, mode, gene_annotation_files=None, temp_dir=None):
     columns = list(ledger.genomes if mode == "Species" else ledger.taxa)
     column_resolver = ledger.resolver.genome if mode == "Species" else ledger.resolver.taxon
-    with open(path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle, lineterminator="\n")
-        writer.writerow(GPA_METADATA_COLUMNS + columns)
-        for family in ledger.sorted_families(family_ids):
-            occupied = family.prevalence
-            sequence_count = len(family.members)
-            cells = {column: [] for column in columns}
-            lengths = []
-            for member in family.members:
-                cell_value = member
-                delimiter = ledger.resolver.sequence_delimiter
-                if mode == "Species" and delimiter and delimiter in member:
-                    cell_value = member.split(delimiter, 1)[1]
-                cells[column_resolver(member)].append(cell_value)
-                lengths.append(len(ledger.sequences[member]))
-            metadata = [
-                family.family_id,
-                "",
-                "",
-                occupied,
-                sequence_count,
-                f"{sequence_count / occupied:.6f}" if occupied else "0.000000",
-                "",
-                "",
-                "",
-                "",
-                "",
-                min(lengths) if lengths else "",
-                max(lengths) if lengths else "",
-                f"{sum(lengths) / len(lengths):.2f}" if lengths else "",
-            ]
-            writer.writerow(metadata + ["  ".join(cells[column]) for column in columns])
+    annotation_store = _GeneAnnotationStore(gene_annotation_files, temp_dir=temp_dir)
+    try:
+        with open(path, "w", newline="", encoding="utf-8") as handle:
+            writer = csv.writer(handle, lineterminator="\n")
+            writer.writerow(GPA_METADATA_COLUMNS + columns)
+            for family in ledger.sorted_families(family_ids):
+                occupied = family.prevalence
+                sequence_count = len(family.members)
+                cells = {column: [] for column in columns}
+                lengths = []
+                gene_names = []
+                annotations = []
+                for member in family.members:
+                    cell_value = member
+                    delimiter = ledger.resolver.sequence_delimiter
+                    if mode == "Species" and delimiter and delimiter in member:
+                        cell_value = member.split(delimiter, 1)[1]
+                    cells[column_resolver(member)].append(cell_value)
+                    lengths.append(ledger.sequences.sequence_length(member))
+                    gene_name, annotation = annotation_store.get(member)
+                    if gene_name:
+                        gene_names.append(gene_name)
+                    if annotation:
+                        annotations.append(annotation)
+                metadata = [
+                    family.family_id,
+                    _family_metadata_consensus(gene_names),
+                    _family_metadata_consensus(annotations),
+                    occupied,
+                    sequence_count,
+                    f"{sequence_count / occupied:.6f}" if occupied else "0.000000",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    min(lengths) if lengths else "",
+                    max(lengths) if lengths else "",
+                    f"{sum(lengths) / len(lengths):.2f}" if lengths else "",
+                ]
+                writer.writerow(metadata + ["  ".join(cells[column]) for column in columns])
+    finally:
+        annotation_store.close()
 
 
 def _write_gene_group_table(path, ledger, family_ids):
@@ -1220,6 +1387,14 @@ def _write_run_manifest(path, options, ledger, selected_ids, mode, total_sequenc
         'cluster_file': os.path.abspath(options.clusters),
         'fasta_file': os.path.abspath(options.fasta) if getattr(options, 'fasta', None) else None,
         'sequence_db': os.path.abspath(options.sequence_db) if getattr(options, 'sequence_db', None) else None,
+        'sequence_db_out': os.path.abspath(options.sequence_db_out) if getattr(options, 'sequence_db_out', None) else None,
+        'sequence_db_path': os.path.abspath(ledger.sequences.path),
+        'sequence_db_retained': bool(getattr(ledger.sequences, 'persistent', False)),
+        'gene_annotation_files': (
+            list(getattr(options, 'gene_annotation_files', []) or [])
+            if not isinstance(getattr(options, 'gene_annotation_files', None), str)
+            else [getattr(options, 'gene_annotation_files')]
+        ),
         'reclustered_file': (
             os.path.abspath(options.reclustered) if getattr(options, 'reclustered', None) else None
         ),
@@ -1255,98 +1430,109 @@ def run_pangenome_workflow(options, mode):
         options=options,
         logger=logger,
         sequence_db_path=getattr(options, "sequence_db", None),
+        supplemental_sequence_ids=getattr(options, "supplemental_sequence_ids", None),
+        sequence_db_out_path=getattr(options, "sequence_db_out", None),
     )
-    total_sequences = len(ledger.sequences)
-    logger.info("Family ledger ready: %s sequences, %s final families", total_sequences, len(ledger.families))
-    group_text = options.species_groups if mode == "Species" else options.core_groups
-    categories, groups = classify_families(ledger, mode, group_text)
-    logger.info("Classified families into %s categories", len(categories))
-
-    all_family_ids = list(ledger.families)
-    if getattr(options, "single_copy_only", False) or float(
-        getattr(options, "single_copy_tolerance", 0.0) or 0.0
-    ) > 0:
-        tolerance = float(getattr(options, "single_copy_tolerance", 0.0) or 0.0)
-        selected_ids = ledger.selected_single_copy(tolerance)
-    else:
-        selected_ids = all_family_ids
-
-    output_dir = os.path.abspath(options.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-    logger.info("Writing assignment and summary outputs to %s", output_dir)
-    ledger.write_assignments(os.path.join(output_dir, "gene_family_assignments.tsv"))
-    _write_family_summary(
-        os.path.join(output_dir, "family_summary.tsv"), ledger, selected_ids, mode, groups
-    )
-    _write_statistics(
-        os.path.join(output_dir, "summary_statistics.txt"),
-        ledger,
-        selected_ids,
-        categories,
-        mode,
-        total_sequences,
-        groups,
-    )
-    _write_run_manifest(
-        os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode, total_sequences,
-    )
-    if getattr(options, "gene_presence_absence_out", True):
-        logger.info("Writing gene_presence_absence.csv")
-        _write_gpa(os.path.join(output_dir, "gene_presence_absence.csv"), ledger, selected_ids, mode)
-    baseline_output_dir = getattr(options, "baseline_output_dir", None)
-    if baseline_output_dir:
-        if mode == "Species":
-            logger.info("Writing original-core supplementation impact report")
-            _append_supplementation_impact(
-                output_dir, baseline_output_dir,
-                _read_json_dict(os.path.join(output_dir, "run_manifest.json")),
-                mode, groups,
-            )
-        else:
-            logger.warning(
-                "Original-core lineage report was not generated: it currently supports Species mode only."
-            )
-    if getattr(options, "gene_group_table", False):
-        logger.info("Writing gene_group_table.tsv")
-        _write_gene_group_table(os.path.join(output_dir, "gene_group_table.tsv"), ledger, selected_ids)
-    if getattr(options, "core_group_table", False):
-        logger.info("Writing core_group_table.tsv")
-        _write_core_group_table(os.path.join(output_dir, "core_group_table.tsv"), ledger, selected_ids)
-    logger.info("Writing pan_genome_reference.fa")
-    _write_reference(os.path.join(output_dir, "pan_genome_reference.fa"), ledger, selected_ids)
-
-    requested_ids = _requested_family_ids(options, ledger, selected_ids)
-    if getattr(options, "write_groups", None) or getattr(options, "write_individual_groups", False):
-        _write_family_fastas(options, ledger, requested_ids)
-    if getattr(options, "align_core", False):
-        logger.info("Writing core_gene_alignment.aln")
-        _write_alignment(options, ledger, requested_ids)
-    if getattr(options, "visualise", False):
-        logger.info("Writing visual outputs")
-        write_ledger_visualisations(options, ledger, selected_ids, categories, mode)
-    if getattr(options, "added_genomes", None):
-        if not getattr(options, "reclustered", None):
-            raise FamilyInputError("--added-genomes requires -reclustered with the combined reclustering output")
-        try:
-            from .genome_reports import write_extension_report
-        except ImportError:
-            from genome_reports import write_extension_report
-        write_extension_report(
-            output_dir,
-            ledger,
-            options.added_genomes,
-            groups=groups,
-            mode=mode,
-        )
-
-    print(
-        f"Built {len(ledger.families):,} final families from {total_sequences:,} sequences; "
-        f"all sequences assigned exactly once."
-    )
-    if len(selected_ids) != len(ledger.families):
-        print(f"Retained {len(selected_ids):,} families after single-copy filtering.")
     try:
-        ledger.sequences.close()
-    except Exception:
-        logger.debug("Sequence store close failed", exc_info=True)
-    return ledger
+        total_sequences = len(ledger.sequences)
+        logger.info("Family ledger ready: %s sequences, %s final families", total_sequences, len(ledger.families))
+        group_text = options.species_groups if mode == "Species" else options.core_groups
+        categories, groups = classify_families(ledger, mode, group_text)
+        logger.info("Classified families into %s categories", len(categories))
+
+        all_family_ids = list(ledger.families)
+        if getattr(options, "single_copy_only", False) or float(
+            getattr(options, "single_copy_tolerance", 0.0) or 0.0
+        ) > 0:
+            tolerance = float(getattr(options, "single_copy_tolerance", 0.0) or 0.0)
+            selected_ids = ledger.selected_single_copy(tolerance)
+        else:
+            selected_ids = all_family_ids
+
+        output_dir = os.path.abspath(options.output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info("Writing assignment and summary outputs to %s", output_dir)
+        ledger.write_assignments(os.path.join(output_dir, "gene_family_assignments.tsv"))
+        _write_family_summary(
+            os.path.join(output_dir, "family_summary.tsv"), ledger, selected_ids, mode, groups
+        )
+        _write_statistics(
+            os.path.join(output_dir, "summary_statistics.txt"),
+            ledger,
+            selected_ids,
+            categories,
+            mode,
+            total_sequences,
+            groups,
+        )
+        _write_run_manifest(
+            os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode, total_sequences,
+        )
+        if getattr(options, "gene_presence_absence_out", True):
+            logger.info("Writing gene_presence_absence.csv")
+            _write_gpa(
+                os.path.join(output_dir, "gene_presence_absence.csv"),
+                ledger,
+                selected_ids,
+                mode,
+                gene_annotation_files=getattr(options, "gene_annotation_files", None),
+                temp_dir=getattr(options, "tmp_dir", None),
+            )
+        baseline_output_dir = getattr(options, "baseline_output_dir", None)
+        if baseline_output_dir:
+            if mode == "Species":
+                logger.info("Writing original-core supplementation impact report")
+                _append_supplementation_impact(
+                    output_dir, baseline_output_dir,
+                    _read_json_dict(os.path.join(output_dir, "run_manifest.json")),
+                    mode, groups,
+                )
+            else:
+                logger.warning(
+                    "Original-core lineage report was not generated: it currently supports Species mode only."
+                )
+        if getattr(options, "gene_group_table", False):
+            logger.info("Writing gene_group_table.tsv")
+            _write_gene_group_table(os.path.join(output_dir, "gene_group_table.tsv"), ledger, selected_ids)
+        if getattr(options, "core_group_table", False):
+            logger.info("Writing core_group_table.tsv")
+            _write_core_group_table(os.path.join(output_dir, "core_group_table.tsv"), ledger, selected_ids)
+        logger.info("Writing pan_genome_reference.fa")
+        _write_reference(os.path.join(output_dir, "pan_genome_reference.fa"), ledger, selected_ids)
+
+        requested_ids = _requested_family_ids(options, ledger, selected_ids)
+        if getattr(options, "write_groups", None) or getattr(options, "write_individual_groups", False):
+            _write_family_fastas(options, ledger, requested_ids)
+        if getattr(options, "align_core", False):
+            logger.info("Writing core_gene_alignment.aln")
+            _write_alignment(options, ledger, requested_ids)
+        if getattr(options, "visualise", False):
+            logger.info("Writing visual outputs")
+            write_ledger_visualisations(options, ledger, selected_ids, categories, mode)
+        if getattr(options, "added_genomes", None):
+            if not getattr(options, "reclustered", None):
+                raise FamilyInputError("--added-genomes requires -reclustered with the combined reclustering output")
+            try:
+                from .genome_reports import write_extension_report
+            except ImportError:
+                from genome_reports import write_extension_report
+            write_extension_report(
+                output_dir,
+                ledger,
+                options.added_genomes,
+                groups=groups,
+                mode=mode,
+            )
+
+        print(
+            f"Built {len(ledger.families):,} final families from {total_sequences:,} sequences; "
+            f"all sequences assigned exactly once."
+        )
+        if len(selected_ids) != len(ledger.families):
+            print(f"Retained {len(selected_ids):,} families after single-copy filtering.")
+        return ledger
+    finally:
+        try:
+            ledger.sequences.close()
+        except Exception:
+            logger.exception("Failed to close SQLite sequence store")

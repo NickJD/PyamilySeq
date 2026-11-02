@@ -21,7 +21,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
-from .order_analysis import FASTA_SUFFIXES, GFF_SUFFIXES, _normalise_genome_name, _stem_without_suffix
+try:
+    from .order_analysis import FASTA_SUFFIXES, GFF_SUFFIXES, _normalise_genome_name, _stem_without_suffix
+except ImportError:  # Support direct execution from a source checkout.
+    from order_analysis import FASTA_SUFFIXES, GFF_SUFFIXES, _normalise_genome_name, _stem_without_suffix
 
 VERSION = "0.1.0"
 MANIFEST_FIELDS = [
