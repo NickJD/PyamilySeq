@@ -1,12 +1,10 @@
 # PyamilySeq
 
-<p align="left">
-  <a href="https://pypi.org/project/PyamilySeq/"><img src="https://shields.io" alt="PyPI Version"></a>
-  <a href="https://pypi.org/project/PyamilySeq/"><img src="https://shields.io" alt="PyPI Downloads"></a>
-  <a href="https://anaconda.org/bioconda/pyamilyseq"><img src="https://shields.io" alt="Bioconda Version"></a>
-  <a href="https://github.com"><img src="https://shields.io" alt="GitHub License"></a>
-  <a href="https://github.com/NickJD/PyamilySeq"><img src="https://shields.io" alt="GitHub Stars"></a>
-</p>
+[![PyPI Version](https://img.shields.io/pypi/v/PyamilySeq?label=PyPI&style=flat-square)](https://pypi.org/project/PyamilySeq/)
+[![PyPI Downloads](https://img.shields.io/pypi/dm/PyamilySeq?label=Downloads&style=flat-square)](https://pypi.org/project/PyamilySeq/)
+[![Bioconda Version](https://img.shields.io/conda/vn/bioconda/pyamilyseq?label=Bioconda&style=flat-square)](https://anaconda.org/bioconda/pyamilyseq)
+[![GitHub License](https://img.shields.io/github/license/NickJD/PyamilySeq?style=flat-square)](https://github.com/NickJD/PyamilySeq)
+[![GitHub Stars](https://img.shields.io/github/stars/NickJD/PyamilySeq?style=flat-square)](https://github.com/NickJD/PyamilySeq)
 
 
 
