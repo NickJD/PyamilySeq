@@ -426,7 +426,9 @@ def _write_family_summary(path, ledger, family_ids, mode="Species", groups=None)
         writer = csv.DictWriter(handle, fieldnames=fields, delimiter="\t", lineterminator="\n")
         writer.writeheader()
         for family in ledger.sorted_families(family_ids):
-            genome_counts = family.copy_number
+            # Use the same member-by-member genome resolution as the
+            # single-copy filter, including all First + Second members.
+            genome_counts = ledger.family_copy_number(family.family_id)
             raw_bin = family.category.rsplit("_", 1)[-1]
             prevalence_percent = (
                 100.0 * family.prevalence / prevalence_denominator
@@ -626,7 +628,10 @@ def _write_alignment(options, ledger, family_ids):
         writer.writerows(alignment_manifest)
 
 
-def _write_statistics(path, ledger, selected_ids, categories, mode, total_sequences, groups=None):
+def _write_statistics(
+    path, ledger, selected_ids, categories, mode, total_sequences,
+    groups=None, single_copy_filter=None,
+):
     """Write clearly separated reconciliation-stage and prevalence summaries.
 
     Stage describes how a final family arose during supplementation. Prevalence
@@ -670,6 +675,37 @@ def _write_statistics(path, ledger, selected_ids, categories, mode, total_sequen
         handle.write(f"Sequences assigned exactly once: {len(ledger.assignment)}\n")
         handle.write(f"Final gene families: {len(ledger.families)}\n")
         handle.write(f"Families retained after filters: {len(selected)}\n")
+
+        filter_details = single_copy_filter or {
+            "enabled": False,
+            "scope": "final_reconciled_families",
+            "tolerance_percent": None,
+            "retained_families": len(selected),
+            "excluded_families": len(ledger.families) - len(selected),
+        }
+        handle.write("\nSINGLE-COPY FILTER\n")
+        handle.write(
+            "Scope: final reconciled families, counting every member sequence "
+            "from original and supplemental inputs\n"
+        )
+        handle.write(
+            f"Applied: {'yes' if filter_details.get('enabled') else 'no'}\n"
+        )
+        if filter_details.get("enabled"):
+            handle.write(
+                f"Multi-copy tolerance: {filter_details.get('tolerance_percent'):.4f}% "
+                "of occupied genomes\n"
+            )
+            handle.write(
+                "Criterion: number of genomes with more than one family member "
+                "must not exceed floor(occupied genomes x tolerance / 100)\n"
+            )
+        handle.write(
+            f"Families retained: {filter_details.get('retained_families', len(selected)):,}\n"
+        )
+        handle.write(
+            f"Families excluded: {filter_details.get('excluded_families', len(ledger.families) - len(selected)):,}\n"
+        )
 
         handle.write(
             "\nRECONCILIATION PROVENANCE (technical classification)\n"
@@ -1379,7 +1415,10 @@ def _append_supplementation_impact(
     }
 
 
-def _write_run_manifest(path, options, ledger, selected_ids, mode, total_sequences):
+def _write_run_manifest(
+    path, options, ledger, selected_ids, mode, total_sequences,
+    single_copy_filter=None,
+):
     manifest = {
         'schema_version': 1,
         'analysis_mode': mode,
@@ -1403,6 +1442,13 @@ def _write_run_manifest(path, options, ledger, selected_ids, mode, total_sequenc
         'exactly_once_assignment': len(ledger.assignment) == total_sequences,
         'final_families': len(ledger.families),
         'selected_families': len(selected_ids),
+        'single_copy_filter': single_copy_filter or {
+            'enabled': False,
+            'scope': 'final_reconciled_families',
+            'tolerance_percent': None,
+            'retained_families': len(selected_ids),
+            'excluded_families': len(ledger.families) - len(selected_ids),
+        },
         'genomes': len(ledger.genomes),
         'taxa': len(ledger.taxa),
         'stage_counts': dict(Counter(family.stage for family in ledger.families.values())),
@@ -1441,13 +1487,47 @@ def run_pangenome_workflow(options, mode):
         logger.info("Classified families into %s categories", len(categories))
 
         all_family_ids = list(ledger.families)
-        if getattr(options, "single_copy_only", False) or float(
-            getattr(options, "single_copy_tolerance", 0.0) or 0.0
-        ) > 0:
-            tolerance = float(getattr(options, "single_copy_tolerance", 0.0) or 0.0)
+        single_copy_enabled = bool(getattr(options, "single_copy_only", False))
+        raw_tolerance = getattr(options, "single_copy_tolerance", 0.0)
+        try:
+            tolerance = float(raw_tolerance or 0.0)
+        except (TypeError, ValueError):
+            raise FamilyInputError(
+                "Single-copy tolerance must be a finite number between 0 and 100"
+            ) from None
+        if not math.isfinite(tolerance) or tolerance < 0.0 or tolerance > 100.0:
+            raise FamilyInputError(
+                "Single-copy tolerance must be a finite number between 0 and 100"
+            )
+        single_copy_enabled = single_copy_enabled or tolerance > 0.0
+
+        if single_copy_enabled:
+            # This operates on the final ledger, after First and Second
+            # families have been reconciled.  Do not move this filter into the
+            # individual clustering parsers: doing so would miss cross-stage
+            # and cross-source-family copy-number conflicts.
             selected_ids = ledger.selected_single_copy(tolerance)
         else:
             selected_ids = all_family_ids
+
+        single_copy_filter = {
+            "enabled": single_copy_enabled,
+            "scope": "final_reconciled_families",
+            "tolerance_percent": tolerance if single_copy_enabled else None,
+            "counting_unit": "member_sequences_per_genome",
+            "includes_original_and_supplemental_members": True,
+            "retained_families": len(selected_ids),
+            "excluded_families": len(all_family_ids) - len(selected_ids),
+        }
+        if single_copy_enabled:
+            logger.info(
+                "Single-copy filter evaluated %s final reconciled families at %.4f%% tolerance: "
+                "%s retained, %s excluded",
+                len(all_family_ids),
+                tolerance,
+                len(selected_ids),
+                len(all_family_ids) - len(selected_ids),
+            )
 
         output_dir = os.path.abspath(options.output_dir)
         os.makedirs(output_dir, exist_ok=True)
@@ -1464,9 +1544,16 @@ def run_pangenome_workflow(options, mode):
             mode,
             total_sequences,
             groups,
+            single_copy_filter,
         )
         _write_run_manifest(
-            os.path.join(output_dir, 'run_manifest.json'), options, ledger, selected_ids, mode, total_sequences,
+            os.path.join(output_dir, 'run_manifest.json'),
+            options,
+            ledger,
+            selected_ids,
+            mode,
+            total_sequences,
+            single_copy_filter,
         )
         if getattr(options, "gene_presence_absence_out", True):
             logger.info("Writing gene_presence_absence.csv")

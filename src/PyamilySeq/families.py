@@ -705,6 +705,12 @@ class Family:
 
     @property
     def copy_number(self) -> Counter:
+        """Return sequence copy number per genome for this final family.
+
+        ``genomes`` is intentionally one entry per member sequence (not one
+        entry per occupied genome).  Consequently, repeated genome identifiers
+        represent genuine multi-copy membership.
+        """
         return Counter(self.genomes)
 
 
@@ -1135,16 +1141,54 @@ class FamilyLedger:
             candidates = list(members)
         return min(candidates, key=lambda member: (-self.sequences.sequence_length(member), member))
 
+    def family_copy_number(self, family_id: str) -> Counter:
+        """Count members per genome in a *final reconciled* family.
+
+        The family member list is the authoritative source here.  It contains
+        every sequence brought together by the original and reclustered
+        datasets, including supplementary members and members from multiple
+        original families that were merged during reclustering.  Resolve each
+        member independently so that two genomes belonging to the same genus
+        are not incorrectly treated as one genome.
+        """
+        try:
+            family = self.families[family_id]
+        except KeyError:
+            raise KeyError(f"Unknown final family ID: {family_id}") from None
+        return Counter(self.resolver.genome(member) for member in family.members)
+
     def selected_single_copy(self, tolerance_percent=0.0):
-        if tolerance_percent < 0 or tolerance_percent > 100:
-            raise FamilyInputError("Single-copy tolerance must be between 0 and 100")
+        """Select final families within the configured multi-copy tolerance.
+
+        Tolerance is the maximum percentage of *occupied genomes* in a family
+        that may contain more than one member sequence.  A zero tolerance
+        (``--single_copy_only``) therefore excludes a family whenever any
+        genome has more than one member.  Copy number is calculated from the
+        complete final family membership, not from First or Second subsets.
+        """
+        try:
+            tolerance = float(tolerance_percent)
+        except (TypeError, ValueError):
+            raise FamilyInputError(
+                "Single-copy tolerance must be a finite number between 0 and 100"
+            ) from None
+        if not math.isfinite(tolerance) or tolerance < 0 or tolerance > 100:
+            raise FamilyInputError(
+                "Single-copy tolerance must be a finite number between 0 and 100"
+            )
+
         selected = []
-        for family in self.families.values():
-            counts = family.copy_number
-            occupied = len(counts)
-            allowed = math.floor(occupied * tolerance_percent / 100.0)
-            if sum(count > 1 for count in counts.values()) <= allowed:
-                selected.append(family.family_id)
+        for family_id in self.families:
+            counts = self.family_copy_number(family_id)
+            occupied_genomes = len(counts)
+            allowed_multicopy_genomes = math.floor(
+                occupied_genomes * tolerance / 100.0
+            )
+            multicopy_genomes = sum(
+                copy_count > 1 for copy_count in counts.values()
+            )
+            if multicopy_genomes <= allowed_multicopy_genomes:
+                selected.append(family_id)
         return selected
 
     def write_assignments(self, path):
