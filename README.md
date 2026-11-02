@@ -1,10 +1,13 @@
 # PyamilySeq
 
-[![PyPI Version](https://shields.io)](https://pypi.org/project/PyamilySeq/)
-[![PyPI Downloads](https://shields.io)](https://pypi.org/project/PyamilySeq/)
-[![Bioconda Version](https://shields.io)](https://anaconda.org/bioconda/pyamilyseq)
-[![GitHub License](https://shields.io)](https://github.com)
-[![GitHub Stars](https://shields.io)](https://github.com/NickJD/PyamilySeq)
+<p align="left">
+  <a href="https://pypi.org/project/PyamilySeq/"><img src="https://shields.io" alt="PyPI Version"></a>
+  <a href="https://pypi.org/project/PyamilySeq/"><img src="https://shields.io" alt="PyPI Downloads"></a>
+  <a href="https://anaconda.org/bioconda/pyamilyseq"><img src="https://shields.io" alt="Bioconda Version"></a>
+  <a href="https://github.com"><img src="https://shields.io" alt="GitHub License"></a>
+  <a href="https://github.com/NickJD/PyamilySeq"><img src="https://shields.io" alt="GitHub Stars"></a>
+</p>
+
 
 
 PyamilySeq builds gene-family and pangenome summaries from CD-HIT, MMseqs2,
